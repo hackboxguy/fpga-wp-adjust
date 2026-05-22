@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, Mapping
+from typing import Dict, Iterable, Mapping, Optional
 
 
 ChannelGains = Dict[str, float]
@@ -73,7 +73,7 @@ def solve_linear_gains(
     green: XYZ,
     blue: XYZ,
     target_xy: tuple[float, float],
-    target_Y: float | None = None,
+    target_Y: Optional[float] = None,
 ) -> ChannelGains:
     """Solve per-channel linear-light gains for a target white.
 
@@ -130,7 +130,13 @@ def enforce_gain_limits(
     max_gain: float = 1.0,
     allow_above_unity: bool = False,
 ) -> None:
-    """Raise if any gain falls outside the allowed v1 safety range."""
+    """Raise if code-domain pixel-drive gains fall outside the v1 safety range.
+
+    The v1 scalar FPGA block multiplies encoded pixel codes, so these limits
+    apply after any linear-light gain has been converted through
+    ``gain_linear ** (1 / gamma)``. They bound pixel-drive attenuation, not
+    luminance attenuation.
+    """
 
     _validate_channels(gains)
     _require_finite("min_gain", min_gain)
@@ -192,7 +198,13 @@ def compute_seed_gains(
     min_gain: float = 0.5,
     max_gain: float = 1.0,
 ) -> SeedGains:
-    """Run the canonical v1 seed pipeline from measured RGB XYZ to fixed gains."""
+    """Run the canonical headroom-preserving v1 seed pipeline.
+
+    This helper normalizes the strongest channel to unity or below, converts to
+    code-domain gains, enforces the code-domain safety range, and returns fixed
+    register values. Brightness-preserving modes that intentionally boost a
+    channel should use an explicit alternate path.
+    """
 
     linear = normalize_to_headroom(
         solve_linear_gains(red=red, green=green, blue=blue, target_xy=target_xy),

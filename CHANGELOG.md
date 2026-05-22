@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added host-side calibration math helpers and unit tests for Q-format conversion, seed reproduction, xyY/XYZ conversion, gain normalization, and safety limits.
+- Added host-side logical register adapter with mock and dry-run backends.
 - Added `make host-test` and CI coverage for host unit tests.
 - Regenerated the example 12.3-nq1v1 seed from the committed math pipeline.
 

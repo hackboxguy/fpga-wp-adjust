@@ -295,8 +295,9 @@ The damping factor should default to a conservative value such as `0.5-0.7` for 
 Gain safety limits:
 
 1. Default allowed range: `[0.5, 1.0]` for v1 headroom-preserving calibration.
-2. Any mode that permits gains above unity must be explicit and must record that choice in JSON.
-3. A failed or obviously invalid measurement must not be uploaded to the FPGA.
+2. In the v1 host helpers this range is enforced on code-domain pixel-drive gains, after gamma conversion, because the FPGA scalar datapath multiplies encoded pixel codes. It is not a direct luminance-attenuation bound.
+3. Any mode that permits gains above unity must be explicit and must record that choice in JSON.
+4. A failed or obviously invalid measurement must not be uploaded to the FPGA.
 
 The tool should integrate with the existing display-test-framework in this order of preference:
 

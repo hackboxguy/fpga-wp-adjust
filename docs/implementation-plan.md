@@ -159,7 +159,7 @@ Tasks:
 3. Normalize so the strongest channel is at or below unity.
 4. Convert to code-domain gain using measured/configured gamma.
 5. Convert float gains to Q4.12 with round-to-nearest.
-6. Enforce gain safety limits.
+6. Enforce code-domain pixel-drive gain safety limits.
 7. Add synthetic measurement tests.
 8. Add host unit tests to CI once `host/tests/` exists.
 

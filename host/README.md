@@ -16,7 +16,7 @@ Current and planned tools:
 
 ```text
 wp_math.py        # implemented: xyY/RGB gain calculation and Q-format conversion
-wp_registers.py   # board-specific register transport adapter
+wp_registers.py   # implemented: logical register adapter, mock backend, dry-run backend
 wp_calibrate.py   # measurement-driven calibration loop
 wp_load.py        # boot-time calibration upload
 schema/           # calibration JSON schema
@@ -35,3 +35,7 @@ Minimum upload sequence:
 4. Write shadow gains and control.
 5. Write `COMMIT = 0xCA1B`.
 6. Wait for commit consumed, or record pending-until-video if video is not yet running.
+
+`wp_registers.py` intentionally exposes only the logical v1 register map. Board-specific I2C/SPI/CPU transport should be implemented as a backend that provides `read16(addr)` and `write16(addr, value)`.
+
+Hardware backends should add field-debug logging around those low-level transactions. The mock and dry-run backends keep an in-memory transaction list for tests and dry-run output.
