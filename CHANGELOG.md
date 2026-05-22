@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added host-side calibration math helpers and unit tests for Q-format conversion, seed reproduction, xyY/XYZ conversion, gain normalization, and safety limits.
+- Added `make host-test` and CI coverage for host unit tests.
+
 ## 0.1.0 - 2026-05-22
 
 - Added scalar v1 `wp_adjust` RTL with RGB gain, optional signed offsets, saturating clamp, and frame-boundary commit.

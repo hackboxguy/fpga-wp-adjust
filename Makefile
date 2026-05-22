@@ -10,7 +10,7 @@ TB_VVP := $(BUILD_DIR)/tb_wp_adjust.vvp
 CAL_SCHEMA := host/schema/wp-cal-v1.schema.json
 CAL_PROFILES := $(wildcard examples/calibration/*.json)
 
-.PHONY: all test synth-check validate-json clean
+.PHONY: all test synth-check validate-json host-test clean
 
 all: test
 
@@ -29,5 +29,8 @@ synth-check:
 validate-json:
 	$(PYTHON) tools/validate_calibration_json.py --schema $(CAL_SCHEMA) $(CAL_PROFILES)
 
+host-test:
+	$(PYTHON) -m pytest host/tests
+
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) .pytest_cache host/__pycache__ host/tests/__pycache__

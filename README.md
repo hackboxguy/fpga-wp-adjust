@@ -51,7 +51,13 @@ Validate calibration example JSON files against the v1 schema:
 make validate-json
 ```
 
-These targets assume `iverilog`, `vvp`, `yosys`, `python3`, and the Python `jsonschema` package are available on `PATH`.
+Run host-side unit tests:
+
+```sh
+make host-test
+```
+
+These targets assume `iverilog`, `vvp`, `yosys`, `python3`, and the Python `jsonschema` and `pytest` packages are available on `PATH`.
 
 ## FPGA Integration
 
