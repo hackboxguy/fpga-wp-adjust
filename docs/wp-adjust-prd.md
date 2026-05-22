@@ -60,6 +60,8 @@ In the original target system, the existing display-test-framework provided most
 
 The `host/` tools should reuse these entry points where practical rather than duplicating pattern control, spotread retry handling, or brightness plumbing.
 
+Standalone repo note: those measurement tools and display-specific config files are external integration-environment dependencies, not files provided by this repository. The RTL block, register map, schema, example calibration JSON, and Verilog tests can be used without that original measurement framework.
+
 ## 3. Measurement Evidence
 
 The original 12.3-nq1v1 report card showed the white point outside the D65 tolerance region. The underlying color-gamut measurement reported:
@@ -222,7 +224,7 @@ Deferred commit contract:
 
 ## 10. Initial Gain Estimate From Existing Data
 
-Using measured RGBW data from `test-color-gamut.json`, a rough linear-light D65 correction that preserves headroom is:
+Using measured RGBW data from the original target system, a rough linear-light D65 correction that preserves headroom is:
 
 | Channel | Gain |
 |---|---:|
@@ -328,8 +330,8 @@ wp_calibrate.py
   --local-dimming enabled
   --target D65
   --max-iterations 5
-  --framework-root /home/pi/micropanel/share/disptool/display-test-framework
-  --measure-display /home/pi/micropanel/share/disptool/display-test-framework/measure-display.sh
+  --framework-root <display-test-framework-root>
+  --measure-display <display-test-framework-root>/measure-display.sh
   --dry-run
 ```
 
@@ -339,6 +341,8 @@ The script shall not hard-code the final I2C slave address or register subaddres
 
 Calibration shall be stored on the Pi4, for example under `/etc/wp-cal/`.
 
+The canonical v1 schema is `host/schema/wp-cal-v1.schema.json`. The seed profile in `examples/calibration/12-3-nq1v1-seed.json` is expected to validate against that schema. Host loaders shall treat the flat integer `gains` fields as authoritative; `gain_metadata` is explanatory and may be absent.
+
 Required JSON fields:
 
 ```json
@@ -346,6 +350,7 @@ Required JSON fields:
   "format_version": 1,
   "panel_id": "12-3-nq1v1",
   "panel_serial": "unknown-or-real-serial",
+  "profile_name": "12-3-nq1v1-initial-code-domain-seed",
   "created_utc": "2026-05-22T00:00:00Z",
   "target_white": {"name": "D65", "x": 0.3127, "y": 0.3290},
   "calibration_condition": {
@@ -353,16 +358,23 @@ Required JSON fields:
     "brightness_percent": 100,
     "local_dimming": "enabled",
     "vision_boost": "not_present",
-    "backlight_temp_c": 0.0
+    "backlight_temp_c": null
   },
   "fpga": {
     "register_map": "wp_adjust_scalar_v1",
-    "gain_format": "Q4.12"
+    "gain_format": "Q4.12",
+    "frac_bits": 12,
+    "unity_hex": "0x1000"
   },
   "gains": {
     "r": 3869,
     "g": 4096,
     "b": 3782
+  },
+  "gain_metadata": {
+    "assumed_gamma": 2.184,
+    "code_domain_float": {"r": 0.9446, "g": 1.0, "b": 0.9233},
+    "q_format_hex": {"r": "0x0F1D", "g": "0x1000", "b": "0x0EC6"}
   },
   "offsets": {
     "enabled": false,
@@ -371,12 +383,13 @@ Required JSON fields:
     "b": 0
   },
   "verification": {
-    "initial_xyY": {"x": 0.310072, "y": 0.308795, "Y": 1211.324},
-    "final_xyY": {"x": 0.0, "y": 0.0, "Y": 0.0},
-    "inside_report_card_tolerance": false,
-    "xy_distance_to_d65": 0.0,
+    "initial_xyY": {"x": 0.310072, "y": 0.308795, "Y": null},
+    "final_xyY": null,
+    "inside_report_card_tolerance": null,
+    "xy_distance_to_d65": null,
     "converged": false
-  }
+  },
+  "notes": []
 }
 ```
 

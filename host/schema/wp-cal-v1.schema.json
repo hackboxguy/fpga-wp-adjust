@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/hackboxguy/fpga-wp-adjust/host/schema/wp-cal-v1.schema.json",
+  "title": "wp_adjust v1 calibration profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "panel_id",
+    "panel_serial",
+    "created_utc",
+    "target_white",
+    "calibration_condition",
+    "fpga",
+    "gains",
+    "offsets",
+    "verification"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "panel_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "panel_serial": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_name": {
+      "type": "string"
+    },
+    "created_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target_white": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "x", "y"],
+      "properties": {
+        "name": {"type": "string"},
+        "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "y": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "calibration_condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "brightness_percent",
+        "local_dimming",
+        "vision_boost"
+      ],
+      "properties": {
+        "pattern": {"type": "string"},
+        "brightness_percent": {"type": "number", "minimum": 0.0, "maximum": 100.0},
+        "local_dimming": {"type": "string"},
+        "vision_boost": {"type": "string"},
+        "backlight_temp_c": {"type": ["number", "null"]}
+      }
+    },
+    "fpga": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["register_map", "gain_format", "frac_bits"],
+      "properties": {
+        "register_map": {"type": "string"},
+        "gain_format": {"type": "string"},
+        "frac_bits": {"type": "integer", "minimum": 0, "maximum": 15},
+        "unity_hex": {"type": "string", "pattern": "^0x[0-9A-Fa-f]+$"}
+      }
+    },
+    "gains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["r", "g", "b"],
+      "properties": {
+        "r": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "g": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "b": {"type": "integer", "minimum": 0, "maximum": 65535}
+      }
+    },
+    "gain_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "assumed_gamma": {"type": "number", "exclusiveMinimum": 0.0},
+        "code_domain_float": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["r", "g", "b"],
+          "properties": {
+            "r": {"type": "number", "minimum": 0.0},
+            "g": {"type": "number", "minimum": 0.0},
+            "b": {"type": "number", "minimum": 0.0}
+          }
+        },
+        "q_format_hex": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["r", "g", "b"],
+          "properties": {
+            "r": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{4}$"},
+            "g": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{4}$"},
+            "b": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{4}$"}
+          }
+        }
+      }
+    },
+    "offsets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "r", "g", "b"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "r": {"type": "integer", "minimum": -32768, "maximum": 32767},
+        "g": {"type": "integer", "minimum": -32768, "maximum": 32767},
+        "b": {"type": "integer", "minimum": -32768, "maximum": 32767}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_xyY",
+        "final_xyY",
+        "inside_report_card_tolerance",
+        "xy_distance_to_d65",
+        "converged"
+      ],
+      "properties": {
+        "initial_xyY": {"$ref": "#/definitions/xyYOrNull"},
+        "final_xyY": {"$ref": "#/definitions/xyYOrNull"},
+        "inside_report_card_tolerance": {"type": ["boolean", "null"]},
+        "xy_distance_to_d65": {"type": ["number", "null"], "minimum": 0.0},
+        "converged": {"type": "boolean"}
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "definitions": {
+    "xyYOrNull": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["x", "y", "Y"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "Y": {"type": ["number", "null"], "minimum": 0.0}
+      }
+    }
+  }
+}

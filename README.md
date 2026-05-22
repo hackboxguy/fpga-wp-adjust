@@ -23,10 +23,12 @@ docs/
   wp-adjust-prd.md         # project PRD and future extension roadmap
 host/
   README.md                # planned Pi/host tooling boundary
+  schema/                  # calibration JSON schema
 examples/
   fpga/wp_adjust_insert.v  # example pipeline insertion wrapper
   calibration/*.json       # example calibration seed data
 Makefile                   # simulation and synthesis sanity targets
+CHANGELOG.md               # release notes and RTL register-map version
 ```
 
 ## Quick Start
@@ -99,6 +101,12 @@ V1 is intentionally simple:
 - FPGA latches the update at a frame boundary.
 
 The current default gain format is unsigned Q4.12, with unity gain equal to `0x1000`.
+
+The canonical calibration schema is [host/schema/wp-cal-v1.schema.json](host/schema/wp-cal-v1.schema.json). The example seed profile in [examples/calibration/12-3-nq1v1-seed.json](examples/calibration/12-3-nq1v1-seed.json) follows that schema.
+
+## Original System Context
+
+This repo does not vendor the original display measurement framework or panel report-card artifacts used to derive the example seed values. Those live in the integrating system. The RTL, register map, testbench, schema, and example profile are self-contained.
 
 ## License
 

@@ -17,8 +17,10 @@ wp_registers.py   # board-specific register transport adapter
 wp_math.py        # xyY/RGB gain calculation and Q-format conversion
 wp_calibrate.py   # measurement-driven calibration loop
 wp_load.py        # boot-time calibration upload
-schemas/          # calibration JSON schema
+schema/           # calibration JSON schema
 ```
+
+The canonical v1 schema is [schema/wp-cal-v1.schema.json](schema/wp-cal-v1.schema.json). The seed profile in [../examples/calibration/12-3-nq1v1-seed.json](../examples/calibration/12-3-nq1v1-seed.json) is representative input for the planned `wp_load.py` tool.
 
 The FPGA block does not persist calibration data. A Pi or other host should load calibration values after every reboot.
 

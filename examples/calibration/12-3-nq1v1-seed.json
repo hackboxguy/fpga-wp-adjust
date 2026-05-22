@@ -1,45 +1,65 @@
 {
-  "schema_version": 1,
+  "format_version": 1,
+  "panel_id": "12-3-nq1v1",
+  "panel_serial": "unknown-or-real-serial",
   "profile_name": "12-3-nq1v1-initial-code-domain-seed",
+  "created_utc": "2026-05-22T00:00:00Z",
   "target_white": {
-    "illuminant": "D65",
+    "name": "D65",
     "x": 0.3127,
     "y": 0.3290
   },
-  "measured_white_before": {
-    "x": 0.310072,
-    "y": 0.308795
+  "calibration_condition": {
+    "pattern": "100_percent_full_field_white",
+    "brightness_percent": 100,
+    "local_dimming": "enabled",
+    "vision_boost": "not_present",
+    "backlight_temp_c": null
   },
-  "assumed_gamma": 2.184,
-  "gain_format": {
-    "type": "unsigned_fixed",
+  "fpga": {
+    "register_map": "wp_adjust_scalar_v1",
+    "gain_format": "Q4.12",
     "frac_bits": 12,
     "unity_hex": "0x1000"
   },
   "gains": {
-    "r": {
-      "float": 0.944,
-      "q4_12_hex": "0x0F1D",
-      "q4_12_dec": 3869
+    "r": 3869,
+    "g": 4096,
+    "b": 3782
+  },
+  "gain_metadata": {
+    "assumed_gamma": 2.184,
+    "code_domain_float": {
+      "r": 0.9446,
+      "g": 1.0,
+      "b": 0.9233
     },
-    "g": {
-      "float": 1.0,
-      "q4_12_hex": "0x1000",
-      "q4_12_dec": 4096
-    },
-    "b": {
-      "float": 0.923,
-      "q4_12_hex": "0x0EC6",
-      "q4_12_dec": 3782
+    "q_format_hex": {
+      "r": "0x0F1D",
+      "g": "0x1000",
+      "b": "0x0EC6"
     }
   },
   "offsets": {
+    "enabled": false,
     "r": 0,
     "g": 0,
     "b": 0
   },
+  "verification": {
+    "initial_xyY": {
+      "x": 0.310072,
+      "y": 0.308795,
+      "Y": null
+    },
+    "final_xyY": null,
+    "inside_report_card_tolerance": null,
+    "xy_distance_to_d65": null,
+    "converged": false
+  },
   "notes": [
     "Initial seed from measured 12.3-nq1v1 white point.",
+    "The integer gains are authoritative for the v1 loader; metadata floats document how the seed was derived.",
     "Use as a starting point only; final calibration should be measurement-driven on the actual display."
   ]
 }
