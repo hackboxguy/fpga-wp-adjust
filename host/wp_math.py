@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Dict, Iterable, Mapping
 
 
-ChannelGains = dict[str, float]
-FixedGains = dict[str, int]
+ChannelGains = Dict[str, float]
+FixedGains = Dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,13 @@ class XYZ:
     X: float
     Y: float
     Z: float
+
+
+@dataclass(frozen=True)
+class SeedGains:
+    linear: ChannelGains
+    code_domain: ChannelGains
+    fixed: FixedGains
 
 
 def xyY_to_XYZ(value: XyY) -> XYZ:
@@ -172,6 +179,29 @@ def gains_to_fixed(
         channel: gain_to_fixed(value, frac_bits=frac_bits, total_bits=total_bits)
         for channel, value in gains.items()
     }
+
+
+def compute_seed_gains(
+    red: XYZ,
+    green: XYZ,
+    blue: XYZ,
+    target_xy: tuple[float, float],
+    gamma: float,
+    frac_bits: int = 12,
+    total_bits: int = 16,
+    min_gain: float = 0.5,
+    max_gain: float = 1.0,
+) -> SeedGains:
+    """Run the canonical v1 seed pipeline from measured RGB XYZ to fixed gains."""
+
+    linear = normalize_to_headroom(
+        solve_linear_gains(red=red, green=green, blue=blue, target_xy=target_xy),
+        max_gain=max_gain,
+    )
+    code_domain = linear_to_code_domain_gains(linear, gamma=gamma)
+    enforce_gain_limits(code_domain, min_gain=min_gain, max_gain=max_gain)
+    fixed = gains_to_fixed(code_domain, frac_bits=frac_bits, total_bits=total_bits)
+    return SeedGains(linear=linear, code_domain=code_domain, fixed=fixed)
 
 
 def fixed_hex(raw: int, total_bits: int = 16) -> str:

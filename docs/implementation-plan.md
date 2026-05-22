@@ -165,7 +165,7 @@ Tasks:
 
 Exit criteria:
 
-1. Existing 12.3-nq1v1 seed reproduces `R=0x0F1D`, `G=0x1000`, `B=0x0EC6`.
+1. Existing 12.3-nq1v1 seed reproduces `R=0x0F19`, `G=0x1000`, `B=0x0EC3`.
 2. Invalid measurements fail closed.
 3. Gains outside safety limits are rejected unless an explicit override mode is used.
 

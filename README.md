@@ -57,7 +57,7 @@ Run host-side unit tests:
 make host-test
 ```
 
-These targets assume `iverilog`, `vvp`, `yosys`, `python3`, and the Python `jsonschema` and `pytest` packages are available on `PATH`.
+These targets assume `iverilog`, `vvp`, `yosys`, Python 3.9 or newer, and the Python `jsonschema` and `pytest` packages are available on `PATH`.
 
 ## FPGA Integration
 

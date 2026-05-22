@@ -228,17 +228,17 @@ Using measured RGBW data from the original target system, a rough linear-light D
 
 | Channel | Gain |
 |---|---:|
-| R | about `0.883` |
+| R | about `0.881` |
 | G | `1.000` |
-| B | about `0.840` |
+| B | about `0.839` |
 
 The v1 FPGA datapath applies gain directly to encoded pixel codes, not linear luminance. Therefore the initial upload seed should compensate for the measured gamma. With measured gamma about `2.184`, the code-domain seed is:
 
 | Channel | Code-domain gain | Q4.12 |
 |---|---:|---:|
-| R | about `0.944` | `0x0F1D` |
+| R | about `0.944` | `0x0F19` |
 | G | `1.000` | `0x1000` |
-| B | about `0.923` | `0x0EC6` |
+| B | about `0.923` | `0x0EC3` |
 
 These values should be rounded to nearest when converting to Q4.12. They are still only a starting point; the calibration script must measure after applying gains and iterate until the target is reached or convergence fails.
 
@@ -247,9 +247,9 @@ The more aggressive linear-light values would be appropriate for a future linear
 Example v1 Q4.12 seed:
 
 ```text
-R_GAIN = 0x0F1D
+R_GAIN = 0x0F19
 G_GAIN = 0x1000
-B_GAIN = 0x0EC6
+B_GAIN = 0x0EC3
 ```
 
 ## 11. Pi4 Calibration Tool
@@ -367,14 +367,14 @@ Required JSON fields:
     "unity_hex": "0x1000"
   },
   "gains": {
-    "r": 3869,
+    "r": 3865,
     "g": 4096,
-    "b": 3782
+    "b": 3779
   },
   "gain_metadata": {
     "assumed_gamma": 2.184,
-    "code_domain_float": {"r": 0.9446, "g": 1.0, "b": 0.9233},
-    "q_format_hex": {"r": "0x0F1D", "g": "0x1000", "b": "0x0EC6"}
+    "code_domain_float": {"r": 0.9437, "g": 1.0, "b": 0.9226},
+    "q_format_hex": {"r": "0x0F19", "g": "0x1000", "b": "0x0EC3"}
   },
   "offsets": {
     "enabled": false,
@@ -479,7 +479,7 @@ Bench tests:
 Host tests:
 
 1. `wp_math.py` converts gains to the selected fixed-point format correctly.
-2. Given the current measured white and RGBW primaries, the linear-light estimate is within `±0.005` of `R=0.883`, `G=1.000`, `B=0.840`, and the v1 encoded-code seed using gamma `2.184` is within `±0.005` of `R=0.944`, `G=1.000`, `B=0.923`.
+2. Given the current measured white and RGBW primaries, the linear-light estimate is within `±0.005` of `R=0.881`, `G=1.000`, `B=0.839`, and the v1 encoded-code seed using gamma `2.184` is within `±0.005` of `R=0.944`, `G=1.000`, `B=0.923`.
 3. JSON schema accepts a valid v1 calibration and rejects missing/invalid gains.
 4. `wp_load.py --dry-run` produces the expected logical register-write sequence without touching hardware.
 5. `wp_calibrate.py --dry-run` completes a synthetic convergence loop and writes schema-valid JSON.

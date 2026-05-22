@@ -2,6 +2,8 @@
 
 Host-side calibration and upload tools are intentionally separate from the FPGA datapath.
 
+Host Python code targets Python 3.9 or newer.
+
 The expected host responsibilities are:
 
 1. Read display measurements.

@@ -6,12 +6,12 @@ import pytest
 from host.wp_math import (
     XYZ,
     XyY,
+    compute_seed_gains,
     enforce_gain_limits,
     fixed_hex,
     fixed_to_gain,
     gain_to_fixed,
     gains_to_fixed,
-    linear_to_code_domain_gains,
     normalize_to_headroom,
     solve_linear_gains,
     xyY_to_XYZ,
@@ -21,6 +21,11 @@ from host.wp_math import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED_PATH = ROOT / "examples" / "calibration" / "12-3-nq1v1-seed.json"
+MEASURED_RED = XYZ(X=577.619358, Y=274.781044, Z=15.750556)
+MEASURED_GREEN = XYZ(X=362.747017, Y=829.885620, Z=55.691833)
+MEASURED_BLUE = XYZ(X=278.965856, Y=108.852664, Z=1427.477361)
+D65_XY = (0.3127, 0.3290)
+MEASURED_GAMMA = 2.184
 
 
 def test_seed_profile_gains_round_to_q4_12():
@@ -32,17 +37,25 @@ def test_seed_profile_gains_round_to_q4_12():
     assert {channel: fixed_hex(value) for channel, value in fixed.items()} == seed[
         "gain_metadata"
     ]["q_format_hex"]
-    assert fixed == {"r": 0x0F1D, "g": 0x1000, "b": 0x0EC6}
+    assert fixed == {"r": 0x0F19, "g": 0x1000, "b": 0x0EC3}
 
 
-def test_prd_linear_seed_converts_to_expected_code_domain_values():
-    linear = {"r": 0.883, "g": 1.0, "b": 0.840}
-    code = linear_to_code_domain_gains(linear, gamma=2.184)
+def test_real_measured_rgbw_pipeline_reproduces_seed():
+    seed = compute_seed_gains(
+        red=MEASURED_RED,
+        green=MEASURED_GREEN,
+        blue=MEASURED_BLUE,
+        target_xy=D65_XY,
+        gamma=MEASURED_GAMMA,
+    )
 
-    assert code["r"] == pytest.approx(0.9446, abs=0.001)
-    assert code["g"] == pytest.approx(1.0, abs=0.0001)
-    assert code["b"] == pytest.approx(0.9233, abs=0.001)
-    assert gains_to_fixed(code) == {"r": 0x0F1D, "g": 0x1000, "b": 0x0EC6}
+    assert seed.linear["r"] == pytest.approx(0.8811, abs=0.0001)
+    assert seed.linear["g"] == pytest.approx(1.0, abs=0.0001)
+    assert seed.linear["b"] == pytest.approx(0.8388, abs=0.0001)
+    assert seed.code_domain["r"] == pytest.approx(0.9437, abs=0.0001)
+    assert seed.code_domain["g"] == pytest.approx(1.0, abs=0.0001)
+    assert seed.code_domain["b"] == pytest.approx(0.9226, abs=0.0001)
+    assert seed.fixed == {"r": 0x0F19, "g": 0x1000, "b": 0x0EC3}
 
 
 def test_fixed_point_round_half_up_and_inverse():
@@ -79,8 +92,14 @@ def test_synthetic_rgbw_solve_and_normalize():
     normalized = normalize_to_headroom(gains)
 
     assert set(normalized) == {"r", "g", "b"}
-    assert max(normalized.values()) == pytest.approx(1.0)
+    assert max(normalized.values()) <= 1.0 + 1e-12
     assert all(value >= 0.0 for value in normalized.values())
+
+
+def test_normalize_to_headroom_does_not_boost():
+    gains = {"r": 0.75, "g": 0.80, "b": 0.70}
+
+    assert normalize_to_headroom(gains) == gains
 
 
 def test_gain_safety_limits_fail_closed():
