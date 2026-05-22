@@ -58,6 +58,7 @@ v0.2.0-host-mock-stack
 v0.3.0-cdc-sim-verified
 v0.4.0-fpga-pass-through-integrated
 v0.5.0-register-control-integrated
+v0.5.1-manual-gain-confirmed
 v0.6.0-host-loader-hardware-accepted
 v0.7.0-first-measured-calibration
 v1.0.0-bench-accepted
@@ -160,6 +161,7 @@ Tasks:
 5. Convert float gains to Q4.12 with round-to-nearest.
 6. Enforce gain safety limits.
 7. Add synthetic measurement tests.
+8. Add host unit tests to CI once `host/tests/` exists.
 
 Exit criteria:
 
@@ -193,6 +195,7 @@ Tasks:
 3. Add hardware backend interface, but keep it inactive until Track B.
 4. Support read/write logging.
 5. Support dry-run mode that emits the exact logical transaction sequence.
+6. Add host unit tests to CI once `host/tests/` exists.
 
 Exit criteria:
 
@@ -216,9 +219,14 @@ Planned files:
 
 ```text
 host/wp_load.py
+host/tests/
+```
+
+Existing inputs:
+
+```text
 host/schema/wp-cal-v1.schema.json
 examples/calibration/*.json
-host/tests/
 ```
 
 Tasks:
@@ -231,6 +239,7 @@ Tasks:
 6. Write control/gains/offsets.
 7. Write `COMMIT = 0xCA1B`.
 8. Handle pending-until-video gracefully if `vsync` is not running yet.
+9. Add host unit tests to CI once `host/tests/` exists.
 
 Exit criteria:
 
@@ -258,13 +267,14 @@ tb/tb_wp_adjust_cdc_bridge.v, if the bridge is generic enough to keep here
 
 Tasks:
 
-1. Decide whether the CDC bridge belongs in this reusable repo or the board FPGA repo.
-2. Simulate config writes from a bus clock unrelated to pixel `clk`.
-3. Synchronize write strobes/address/data into pixel `clk`.
-4. Verify shadow writes are complete and stable before `COMMIT`.
-5. Verify commit/status handshakes cannot double-fire or lose a write.
-6. Verify `DEFAULTS` cancels pending commit across the bridge.
-7. Add the CDC test to CI if the bridge is kept in this repo.
+1. Decide whether the CDC bridge RTL belongs in this reusable repo or the board FPGA repo.
+2. Complete CDC simulation before Track B starts, regardless of which repo owns the bridge RTL.
+3. Simulate config writes from a bus clock unrelated to pixel `clk`.
+4. Synchronize write strobes/address/data into pixel `clk`.
+5. Verify shadow writes are complete and stable before `COMMIT`.
+6. Verify commit/status handshakes cannot double-fire or lose a write.
+7. Verify `DEFAULTS` cancels pending commit across the bridge.
+8. Add the CDC test to CI if the bridge is kept in this repo.
 
 Exit criteria:
 
@@ -285,7 +295,7 @@ Do not spend scarce bench time debugging software and simple register-sequence b
 
 1. Track A0 complete.
 2. Track A2/A3/A4 implemented against mock data/backends.
-3. A5 either simulated in this repo or explicitly assigned to the board FPGA repo.
+3. A5 CDC simulation completed, either in this repo or in the board FPGA repo that owns the bridge RTL.
 4. A known-good calibration seed available.
 5. A clear rollback command/path: `DEFAULTS`, disable boot loader, or bypass `wp_adjust`.
 
