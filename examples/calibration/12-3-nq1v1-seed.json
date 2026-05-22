@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profile_name": "12-3-nq1v1-initial-code-domain-seed",
+  "target_white": {
+    "illuminant": "D65",
+    "x": 0.3127,
+    "y": 0.3290
+  },
+  "measured_white_before": {
+    "x": 0.310072,
+    "y": 0.308795
+  },
+  "assumed_gamma": 2.184,
+  "gain_format": {
+    "type": "unsigned_fixed",
+    "frac_bits": 12,
+    "unity_hex": "0x1000"
+  },
+  "gains": {
+    "r": {
+      "float": 0.944,
+      "q4_12_hex": "0x0F1D",
+      "q4_12_dec": 3869
+    },
+    "g": {
+      "float": 1.0,
+      "q4_12_hex": "0x1000",
+      "q4_12_dec": 4096
+    },
+    "b": {
+      "float": 0.923,
+      "q4_12_hex": "0x0EC6",
+      "q4_12_dec": 3782
+    }
+  },
+  "offsets": {
+    "r": 0,
+    "g": 0,
+    "b": 0
+  },
+  "notes": [
+    "Initial seed from measured 12.3-nq1v1 white point.",
+    "Use as a starting point only; final calibration should be measurement-driven on the actual display."
+  ]
+}

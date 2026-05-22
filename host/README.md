@@ -1,0 +1,32 @@
+# Host Tools
+
+Host-side calibration and upload tools are intentionally separate from the FPGA datapath.
+
+The expected host responsibilities are:
+
+1. Read display measurements.
+2. Compute RGB gains for D65 white-point correction.
+3. Store calibration JSON persistently.
+4. Upload calibration at boot.
+5. Respect the deferred-commit register contract.
+
+Planned tools:
+
+```text
+wp_registers.py   # board-specific register transport adapter
+wp_math.py        # xyY/RGB gain calculation and Q-format conversion
+wp_calibrate.py   # measurement-driven calibration loop
+wp_load.py        # boot-time calibration upload
+schemas/          # calibration JSON schema
+```
+
+The FPGA block does not persist calibration data. A Pi or other host should load calibration values after every reboot.
+
+Minimum upload sequence:
+
+1. Probe `ID`, `VERSION`, and `STATUS`.
+2. Confirm `STATUS[15:8] == 12` for Q4.12 v1.
+3. Wait until no commit is pending.
+4. Write shadow gains and control.
+5. Write `COMMIT = 0xCA1B`.
+6. Wait for commit consumed, or record pending-until-video if video is not yet running.
