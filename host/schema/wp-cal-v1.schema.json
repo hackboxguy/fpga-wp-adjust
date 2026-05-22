@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/hackboxguy/fpga-wp-adjust/host/schema/wp-cal-v1.schema.json",
+  "$id": "urn:fpga-wp-adjust:wp-cal-v1.schema.json",
   "title": "wp_adjust v1 calibration profile",
   "type": "object",
   "additionalProperties": false,

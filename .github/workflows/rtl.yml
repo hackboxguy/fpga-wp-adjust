@@ -16,6 +16,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y iverilog yosys
 
+      - name: Install Python validation tools
+        run: python3 -m pip install jsonschema
+
+      - name: Validate calibration examples
+        run: make validate-json
+
       - name: Run directed simulation
         run: make test
 

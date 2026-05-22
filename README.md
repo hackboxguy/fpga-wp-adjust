@@ -45,7 +45,13 @@ Run a synthesis/elaboration sanity check:
 make synth-check
 ```
 
-Both targets assume `iverilog`, `vvp`, and `yosys` are available on `PATH`.
+Validate calibration example JSON files against the v1 schema:
+
+```sh
+make validate-json
+```
+
+These targets assume `iverilog`, `vvp`, `yosys`, `python3`, and the Python `jsonschema` package are available on `PATH`.
 
 ## FPGA Integration
 
