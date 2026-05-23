@@ -238,15 +238,17 @@ Tasks:
 5. Wait for no pending commit before writing shadow registers.
 6. Write control/gains/offsets.
 7. Write `COMMIT = 0xCA1B`.
-8. Handle pending-until-video gracefully if `vsync` is not running yet.
-9. Add host unit tests to CI once `host/tests/` exists.
+8. Poll for commit-consumed status for a bounded timeout.
+9. Handle pending-until-video gracefully if `vsync` is not running yet.
+10. Add host unit tests to CI once `host/tests/` exists.
 
 Exit criteria:
 
-1. `--dry-run` prints the expected register sequence.
+1. `--dry-run` logs the expected register sequence.
 2. Mock backend unit tests pass.
 3. Loader never writes shadow registers while commit pending is set.
 4. Schema-invalid calibration files are rejected before any write.
+5. Missing/corrupt calibration input returns a controlled non-zero exit.
 
 Rollback boundary:
 

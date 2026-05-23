@@ -406,7 +406,7 @@ The boot loader shall live in `host/wp_load.py` for v1. It shall:
 4. Validate gain format and register-map version.
 5. Write shadow gain/offset registers.
 6. Commit the new values.
-7. Verify status or read back active/shadow fields if available.
+7. Poll for commit-consumed status for a bounded timeout, or read back active/shadow fields if available.
 8. Log success/failure to systemd journal.
 
 The loader shall not perform measurement or calibration. It only restores known calibration. It must not write new shadow values while `STATUS[0]` commit pending is set. During early boot, a pending commit with no consumed status is acceptable if video/vsync has not started yet; the loader should log "pending until video" rather than treating it as a hard failure.
@@ -414,13 +414,15 @@ The loader shall not perform measurement or calibration. It only restores known 
 Suggested CLI:
 
 ```text
-wp_load.py
+python3 -m host.wp_load
   --cal /etc/wp-cal/<panel-serial>.json
-  --register-map /etc/wp-cal/wp-register-map.json
-  --i2c-bus /dev/i2c-1
+  --schema host/schema/wp-cal-v1.schema.json
   --timeout-sec 10
+  --poll-interval-sec 0.02
   --dry-run
 ```
+
+`--dry-run` is an alias for `--backend dry-run`; `--backend mock` is used by host tests. Board-specific hardware transport options such as `--i2c-bus` and an external `--register-map` file are B4 hardware-backend work, not required for A4. The logical register map remains `docs/register-map.md` and `host/wp_registers.py`.
 
 The register adapter may call an existing `disptool` command path if the production firmware exposes `wp_adjust` through disptool. If not, it may use Linux `i2c-dev` directly. The PRD requires the logical operation, not one fixed transport implementation.
 
