@@ -159,7 +159,7 @@ def test_cli_missing_calibration_returns_controlled_failure(tmp_path, caplog):
     rc = main(["--cal", str(tmp_path / "missing.json"), "--dry-run"])
 
     assert rc == 2
-    assert "leaving FPGA pass-through" in caplog.text
+    assert "not applying calibration" in caplog.text
 
 
 def test_cli_invalid_json_returns_controlled_failure(tmp_path, caplog):
@@ -168,6 +168,19 @@ def test_cli_invalid_json_returns_controlled_failure(tmp_path, caplog):
     bad_json.write_text("{not-json", encoding="utf-8")
 
     rc = main(["--cal", str(bad_json), "--dry-run"])
+
+    assert rc == 3
+    assert "invalid calibration" in caplog.text
+
+
+def test_cli_schema_invalid_profile_returns_controlled_failure(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    bad_profile = tmp_path / "schema-invalid.json"
+    profile = _seed_profile()
+    del profile["gains"]
+    bad_profile.write_text(json.dumps(profile), encoding="utf-8")
+
+    rc = main(["--cal", str(bad_profile), "--dry-run"])
 
     assert rc == 3
     assert "invalid calibration" in caplog.text

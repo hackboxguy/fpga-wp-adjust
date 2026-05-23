@@ -263,9 +263,14 @@ Goal: de-risk the largest FPGA integration issue before board time: crossing fro
 Planned files:
 
 ```text
-rtl/ or examples/fpga/ register-bridge prototype, if this repo owns one
-tb/tb_wp_adjust_cdc_bridge.v, if the bridge is generic enough to keep here
+rtl/wp_adjust_cdc_bridge.v
+tb/tb_wp_adjust_cdc_bridge.v
 ```
+
+Decision: keep a small generic bridge in this reusable repo because the
+`wp_adjust` logical register contract is also defined here. Board-specific
+I2C/SPI/CPU register framing remains outside this repo and should adapt to the
+bridge's simple request/acknowledge bus.
 
 Tasks:
 

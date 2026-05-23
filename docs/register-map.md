@@ -7,6 +7,12 @@ Logical register interface:
 - Register transport supplied by the integrating FPGA design
 - `cfg_*` presented to `wp_adjust` synchronous to pixel `clk`
 
+If the outer register transport is clocked differently from the pixel domain,
+`rtl/wp_adjust_cdc_bridge.v` can bridge a simple one-transaction-at-a-time
+logical bus into the synchronous `cfg_*` interface. Board-specific I2C/SPI/CPU
+register framing remains outside the logical map. Its `bus_req` is accepted on
+a rising edge while `bus_busy` is low.
+
 ## Addresses
 
 | Address | Field | Access | Description |

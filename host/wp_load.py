@@ -194,7 +194,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             poll_interval_sec=max(0.001, args.poll_interval_sec),
         )
     except OSError as exc:
-        LOGGER.warning("calibration unavailable, leaving FPGA pass-through: %s", exc)
+        LOGGER.warning("calibration unavailable; not applying calibration: %s", exc)
         return 2
     except (
         JSONDecodeError,
@@ -202,7 +202,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         jsonschema.SchemaError,
         jsonschema.ValidationError,
     ) as exc:
-        LOGGER.error("invalid calibration, leaving FPGA pass-through: %s", exc)
+        LOGGER.error("invalid calibration; not applying calibration: %s", exc)
         return 3
     except (RuntimeError, TimeoutError) as exc:
         LOGGER.error("failed to load calibration: %s", exc)

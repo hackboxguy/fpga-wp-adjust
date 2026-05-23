@@ -161,7 +161,7 @@ If the upstream video source is 8-bit HDMI content, the integration shall docume
 The current `rtl/wp_adjust.v` is a suitable functional baseline. For production integration, two behaviors should be tightened:
 
 1. Active gain/offset registers should update on a frame boundary, preferably `vsync`, to avoid visible partial-frame tint. The current RTL commits shadow registers after the next filtered rising edge of active-high `in_vsync` after a valid `COMMIT` write.
-2. If the I2C/register bus is not in the pixel clock domain, the register bank must provide a CDC-safe write/commit handshake.
+2. If the I2C/register bus is not in the pixel clock domain, the register bank must provide a CDC-safe write/commit handshake. The reusable `rtl/wp_adjust_cdc_bridge.v` provides a logical request/acknowledge bridge for this boundary; board-specific I2C/SPI/CPU framing remains outside the v1 scalar block.
 
 The block uses asynchronous reset assertion. Production integration shall provide reset deassertion timing/synchronization consistent with the rest of the FPGA clocking scheme.
 

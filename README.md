@@ -15,8 +15,10 @@ The FPGA block only performs real-time streaming pixel math. Calibration, persis
 ```text
 rtl/
   wp_adjust.v              # synthesizable white-point adjustment block
+  wp_adjust_cdc_bridge.v   # optional async control-bus to pixel-clock bridge
 tb/
   tb_wp_adjust.v           # self-checking directed Verilog testbench
+  tb_wp_adjust_cdc_bridge.v # async-clock register bridge testbench
 docs/
   integration-guide.md     # FPGA integration contract and bring-up notes
   register-map.md          # logical register interface
@@ -94,7 +96,7 @@ wp_adjust #(
 
 Important integration points:
 
-- `cfg_*` must be synchronous to `clk`. If the control bus is I2C/SPI/CPU-clocked, add a CDC-safe register bridge outside this block.
+- `cfg_*` must be synchronous to `clk`. If the control bus is I2C/SPI/CPU-clocked, use `rtl/wp_adjust_cdc_bridge.v` or an equivalent CDC-safe bridge.
 - `in_vsync` is expected to be active-high and synchronous to `clk`.
 - The pixel path latency is 2 clock cycles for RGB and sync/control signals.
 - `COMMIT` updates active registers on the next filtered `in_vsync` rising edge.

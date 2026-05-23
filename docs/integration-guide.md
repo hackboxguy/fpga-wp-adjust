@@ -31,11 +31,25 @@ This keeps local dimming and pixel compensation upstream, while white-point trim
 
 If the board control path is I2C, SPI, AXI-Lite, or CPU-clocked, add a CDC-safe register bridge outside this block. Do not connect an asynchronous I2C slave directly to `cfg_*`.
 
+This repo provides `rtl/wp_adjust_cdc_bridge.v` as a small reusable option for
+that boundary. It accepts one logical register transaction at a time in a
+board-local `bus_clk` domain and emits `cfg_wr_en`, `cfg_addr`, and `cfg_wdata`
+in the pixel `clk` domain. It uses request/acknowledge toggles with stable held
+payloads; it is not an I2C, SPI, or AXI-Lite slave by itself. The outer board
+register bank should issue `bus_req` on a rising edge when `bus_busy` is low
+and should consume read data when `bus_ack` pulses.
+
 `in_vsync` is expected to be active-high. Commit timing depends on the filtered rising edge of this signal.
 
 ## Reset
 
 `rst_n` is asynchronous assert. Integrate reset deassertion according to the FPGA project's normal reset strategy.
+
+For `wp_adjust_cdc_bridge`, assert `bus_rst_n` and `pix_rst_n` together during
+initialization and hold the bridge in reset until both clocks are running. Do
+not reset only one bridge clock domain while a transaction may be in flight; if
+a board-level partial reset is required, quiesce the outer register master
+first and reset both bridge domains together.
 
 After reset, the block is pass-through:
 
@@ -72,7 +86,7 @@ Writing `DEFAULTS = 16'hD65D` restores pass-through immediately and cancels a pe
 3. Integrate `wp_adjust` between pixel compensation and LVDS TX.
 4. Verify `out_de/out_hsync/out_vsync` timing after the 2-cycle latency.
 5. Verify register readback for `ID`, `VERSION`, and `STATUS`.
-6. Verify the CDC-safe register bridge if the control bus is not in the pixel clock domain.
+6. Verify `rtl/wp_adjust_cdc_bridge.v` or the board-specific CDC-safe register bridge if the control bus is not in the pixel clock domain.
 7. Write exaggerated gains and confirm a visible color shift.
 8. Write unity/defaults and confirm pass-through behavior.
 9. Load measured calibration gains and confirm the white point moves toward D65.

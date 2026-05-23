@@ -5,6 +5,7 @@
 - Added host-side calibration math helpers and unit tests for Q-format conversion, seed reproduction, xyY/XYZ conversion, gain normalization, and safety limits.
 - Added host-side logical register adapter with mock and dry-run backends.
 - Added host-side boot loader with schema validation, dry-run/mock backends, bounded commit polling, controlled failure handling, and pending-until-video handling.
+- Added optional CDC-safe register bridge RTL and async-clock simulation for the `wp_adjust` logical register interface.
 - Added `make host-test` and CI coverage for host unit tests.
 - Regenerated the example 12.3-nq1v1 seed from the committed math pipeline.
 
