@@ -22,9 +22,32 @@ integration testing, once the RTL integration
   white-point flow simply has no effect on pixelpipe-fpga displays, and
   `0x1D` is being phased out anyway.
 - **wp_adjust is `0x1E`-only**, on its own page. Nothing wp_adjust-related
-  is ever added to the `0x1D` map.
+  is added to the `0x1D` map.
+- **Recorded option (not recommended): a legacy-compat shim on `0x1D`.**
+  The `0x37/0x39/0x3B` addresses *are* free on the Xilinx displays and the
+  `ctrl_regfile` window could be widened to host them, shimming the legacy
+  semantics onto wp_adjust gains (legacy 0..256 scale × 16 = Q4.12, i.e.
+  `gain = value << 4`; 256 → `0x1000` unity exactly). That would let the
+  unmodified legacy matching app drive the new datapath during a transition.
+  It is throwaway work against a slave being phased out, the legacy
+  `wpx/wpy/wpz` ↔ RGB channel mapping would need re-deriving (on the old
+  panel they behaved approximately as B/G/R gains), and the legacy
+  immediate-write semantics bypass the shadow/COMMIT atomicity. Implement
+  only if the old app must keep working during the migration window;
+  otherwise skip.
 
 ### 1.2 The boot-writable register mapping IS decided: `0x1E` page `0x03`
+
+Page choice cross-checked against
+`pixelpipe-fpga/docs/i2c-register-map-new.md`: page `0x00` is the native
+`0x00–0x36` map, page `0x01` is OTA control/status + the ALS snapshot block,
+page `0x02` is the OTA 256-byte data window — **page `0x03` is the first
+unallocated page** (and `ipcreg_core.v` returns `0xFF` for page ≥ 3 today).
+One framing rule from that doc matters here: a **single-byte read pointer
+defaults to page `0x00`**, so every page-3 access — reads included — must
+send the explicit two-byte `{page, reg}` pointer (`w2@0x1E 0x03 <off>`),
+exactly like the existing page-1 ALS reads. The host backends in this flow
+already frame it that way.
 
 The wp_adjust logical map (8-bit register, 16-bit data; see
 `docs/register-map.md`, revision `0x0113`) is exposed on the new I2C slave
@@ -111,7 +134,7 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 | 1.2 | fpga-wp-adjust | **`I2CDevBackend` for `host/wp_load.py`** implementing `RegisterBackend.read16/write16` over `/dev/i2c-N` with the §1.2 framing (stdlib `fcntl.ioctl(I2C_SLAVE=0x0703)` + `os.read/os.write`, same as the children). New CLI: `--backend i2cdev --i2c-dev /dev/i2c-1 --i2c-addr 0x1E --wp-page 0x03`. This is Track B4 of `docs/implementation-plan.md`. Add unit tests for the byte framing (mock fd). | small module + tests |
 | 1.3 | br-wrapper | **Match child: also emit a wp-cal-v1 profile.** `new-white-point-match-child.py` currently writes only its own `disp-tester-white-point-match-v2` JSON — the boot loader cannot replay a *pair-match* result. Mirror the D65 child: write a wp-cal-v1-conformant profile (target_white = measured reference white, `name` = `pair:<peer>:measured-white`) alongside the existing output. | ~60 lines (copy `wp_cal_v1_profile()` from the D65 child) |
 | 1.4 | br-wrapper | **systemd boot-restore unit** (`wp-calibration.service`): after the I2C bus is up, run the loader with `--cal /home/pi/system-settings/wp-cal-d65.json --backend i2cdev --timeout-sec 10`; treat `pending_until_video` as success (video may start later; the commit latches at the first vsync). `ConditionPathExists=` on the cal file so units without calibration boot clean. Decide packaging: buildroot package vs PiOS micropanel deployment (open question §4.1). | unit file + install hook |
-| 1.5 | br-wrapper | Decide + implement the **panel-serial convention** for per-unit files (`--panel-serial` arg on the D65/match buttons; file naming e.g. `wp-cal-<serial>.json` with `wp-cal-d65.json` as the single-unit default). Needed before calibrating more than one unit. | small |
+| 1.5 | br-wrapper | **Panel-serial file convention** for per-unit calibrations: interim single default file now; serial-keyed `wp-cal-<serial>.json` once the factory serial-number feature exists — full plan in §4. | small |
 
 ### Phase SW-2 — after RTL-2 (page-3 probe HW-verified)
 
@@ -157,16 +180,57 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 9. Legacy `0x1D` regression: brightness, LD/PC enables, ALS, OTA unaffected
    throughout.
 
-## 4. Open Questions (need owner decisions, none block SW-1)
+## 4. Suggestion: Display-Serial-Linked Calibration (factory process hook)
+
+The plan of record: when the factory process later gains a **display
+serial-number saving feature**, the boot loader uses that serial to select
+the calibration file — so calibration follows the *display*, not the Pi
+image.
+
+1. **Interim (now, until the factory feature exists):** a single default
+   file per unit (`/home/pi/system-settings/wp-cal-d65.json`). The
+   wp-cal-v1 schema already carries `panel_serial`; the calibration apps
+   write `unknown-or-real-serial` until a real source exists. Nothing
+   blocks on the serial feature.
+2. **Once the factory process stores the serial on the display:** the boot
+   flow becomes `read display serial → load
+   /home/pi/system-settings/wp-cal-<serial>.json → fall back to the default
+   file (or pass-through) if absent`. The loader change is a few lines of
+   file selection; the calibration apps gain `--panel-serial $(read-serial)`
+   so the JSON `panel_serial` field matches the unit. A swapped display
+   then automatically stops matching a stale calibration.
+3. **Recommended place to store the serial: the FPGA SPI config flash**, in
+   a small reserved factory-data sector. The read path already exists end
+   to end — the OTA-over-I2C machinery (`0x1E` pages 1/2, `ota-read`) can
+   read any flash offset from the Pi with **no new RTL**; the factory write
+   is one `ota-flash`-style program of the reserved sector. Coordinate the
+   offset with `pixelpipe-fpga/docs/ota-over-i2c.md`'s flash layout (GOLDEN
+   at `0x0`, UPDATE at `0x400000`, scratch slots above; e.g. the last 4 KB
+   sector of the 16 MB part). Alternatives: a dedicated RO I2C register
+   loaded from flash at boot (needs RTL), or panel-side EDID/TDDI storage
+   (transport unknown).
+4. **Future option, explicitly not v1:** the calibration JSON itself could
+   live in the same factory-data flash region so calibration physically
+   travels with the display. Keep the v1 principle (Pi owns persistence,
+   FPGA stores nothing) until multi-unit logistics actually demand it; the
+   serial-keyed file scheme above already covers display swaps.
+
+This section matches PRD §16.6 (V2F golden-vs-per-panel calibration) and
+implementation-plan B4; when the factory feature lands, work items: factory
+write step, `read-serial` helper (disptool or script over the OTA read
+path), loader file-selection change, calibration-app `--panel-serial`
+wiring.
+
+## 5. Open Questions (need owner decisions, none block SW-1)
 
 1. **Where does the boot-restore service ship?** Buildroot package in
    br-wrapper (`disp-tester` or a new `wp-cal` package) vs the PiOS
    micropanel deployment. The loader itself is deployment-agnostic.
-2. **Panel-serial source** for per-unit calibration files: FPGA has no
-   serial register; candidates are an operator-entered ID, the Pi serial,
-   or a manufacturing-assigned identifier (PRD V2F discusses the options).
-3. **Single profile vs per-condition profiles**: one `wp-cal-d65.json` now;
-   temperature-banded profiles (PRD V2D) would extend the loader's file
-   selection later — no schema change needed.
-4. **i2c bus number** on the production harness (`--i2c-dev` default is
+2. **Single profile vs per-condition profiles**: one calibration file per
+   unit now; temperature-banded profiles (PRD V2D) would extend the
+   loader's file selection later — no schema change needed.
+3. **i2c bus number** on the production harness (`--i2c-dev` default is
    `/dev/i2c-1`; confirm against the board wiring used by disptool).
+4. **Reserved flash offset for the factory-data sector** (§4.3) — needs
+   sign-off against the OTA flash layout before the factory feature is
+   specified.

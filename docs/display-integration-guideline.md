@@ -239,8 +239,19 @@ across a burst. `ipcreg_core.v` muxes pages:
 - **page ≥ 3 → reserved, reads `0xFF`** ← wp_adjust hooks here as page `0x03`
 
 The host scripts in br-wrapper already default to `--wp-page 0x03`, slave
-`0x1E`. The `0x1D` legacy slave has no page concept — wp_adjust is
-**0x1E-only**; document that in `docs/i2c-register-map-new.md`.
+`0x1E`. Page `0x03` is also the first unallocated page in
+`docs/i2c-register-map-new.md` (pages 0/1/2 = native map / OTA-ctrl+ALS /
+OTA window). Note that doc's framing rule: a single-byte read pointer
+defaults to page 0, so **all** page-3 accesses — reads included — must send
+the explicit two-byte `{page, reg}` pointer, like the existing page-1 ALS
+reads.
+
+The `0x1D` legacy slave has no page concept — wp_adjust is **0x1E-only**;
+document the new page in `docs/i2c-register-map-new.md`. (If the legacy
+matching app must keep working during the `0x1D` phase-out, `0x37/0x39/0x3B`
+are free there and could host a compat shim — `gain = legacy_value << 4`
+maps 256 → `0x1000` unity exactly — but this is recorded-only, not
+recommended; see the SW guideline §1.1.)
 
 ### 6.2 The byte adapter (`wp_page3_adapter.v`, clk_tp domain — new RTL)
 
