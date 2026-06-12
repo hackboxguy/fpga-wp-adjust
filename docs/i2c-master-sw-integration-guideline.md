@@ -268,17 +268,79 @@ image.
    sector of the 16 MB part). Alternatives: a dedicated RO I2C register
    loaded from flash at boot (needs RTL), or panel-side EDID/TDDI storage
    (transport unknown).
-4. **Future option, explicitly not v1:** the calibration JSON itself could
-   live in the same factory-data flash region so calibration physically
-   travels with the display. Keep the v1 principle (Pi owns persistence,
-   FPGA stores nothing) until multi-unit logistics actually demand it; the
-   serial-keyed file scheme above already covers display swaps.
-
 This section matches PRD §16.6 (V2F golden-vs-per-panel calibration) and
 implementation-plan B4; when the factory feature lands, work items: factory
 write step, `read-serial` helper (disptool or script over the OTA read
 path), loader file-selection change, calibration-app `--panel-serial`
 wiring.
+
+## 4b. Plan of Record: FPGA Self-Loading Calibration (als-dimmer replay is a gap filler)
+
+End state (owner-confirmed 2026-06-13): the white-point calibration record
+lives in a **reserved block of the FPGA's SPI config flash** (away from the
+active bitstream slots). At power-on the FPGA **self-loads** it — if a valid
+record exists it is applied with no host involvement; if not, the block
+stays in pass-through and simply accepts whatever the I2C master writes.
+Once self-loading is HW-verified, the als-dimmer wp_adjust replay (work item
+1.4) is **disabled by config** — which is exactly its
+`white_point_calibration.wp_adjust.enabled` gate, designed as the kill
+switch. Nothing in SW-1 changes; the als-dimmer path is explicitly the
+**gap filler** until then.
+
+Why the pieces already fit:
+
+- **Pending-until-video is built in**: wp_adjust's COMMIT stays armed until
+  the first filtered vsync, so a boot-time FSM can fire-and-forget its
+  register writes long before video starts — the same semantics the host
+  loader relies on.
+- **The fabric flash-read machinery exists**: `ota_flash_wrap` /
+  `spi_flash_master` already read the config flash post-EOS (including the
+  hard-won STARTUPE2 USRCCLKO handover). The boot FSM reuses that path.
+- **The Pi-side write path exists**: the calibration apps update the flash
+  record through the established OTA-over-I2C erase/program commands — no
+  new transport.
+
+Design notes for the future RTL/SW sessions:
+
+1. **Record format — binary, not JSON** (the FPGA parses it): a fixed
+   32-byte record, e.g. magic `"WPC1"`, register-map major/revision,
+   R/G/B gains (Q4.12), offsets, control, sequence counter, CRC-16/32.
+   Define the format in fpga-wp-adjust (one doc + a Python encoder next to
+   `wp_math.py`) so RTL, als-dimmer, and the calibration apps share one
+   source of truth. The Pi-side JSON remains the provenance/master copy;
+   the flash record is its compiled form.
+2. **Two records (primary + backup) in one reserved 4 KB sector**, pick the
+   valid-CRC record with the higher sequence number; both invalid → boot
+   pass-through. Calibration is non-critical by design (failure mode =
+   uncalibrated, never broken video), so A/B within a sector is enough.
+3. **Flash placement**: a factory-data region shared with the display
+   serial (§4.3) — e.g. the last 64 KB block (`0xFF0000`) of the 16 MB
+   part, clear of GOLDEN (`0x0`), UPDATE (`0x400000` + ~2.2 MB), and the
+   OTA scratch slots; must be ≥ `0x400000` so the existing OTA range-guard
+   permits Pi-side writes. Needs sign-off against
+   `pixelpipe-fpga/docs/ota-over-i2c.md`'s layout (open question §5.4).
+4. **New RTL (small)**: a `wp_cal_boot_loader` FSM — after EOS, read the
+   record, validate magic/version/CRC, then drive wp_adjust's `cfg_*` port
+   (shadow writes + COMMIT) through a mux that gives the boot FSM the port
+   until a sticky `boot_done`, then hands over to the I2C page-3 path
+   permanently. Boot finishes microseconds after config; the Pi is seconds
+   away — no realistic contention, but the mux makes it deterministic.
+   Also needs arbitration with host OTA commands on the flash master
+   (boot-window priority is sufficient).
+5. **Precedence**: the flash record is only the boot *seed*; later I2C
+   writes always win (live registers are last-writer-wins, and
+   re-calibration rewrites the flash record). During the transition window
+   where both self-load and als-dimmer replay run, both apply the same
+   calibration event's values — benign, but keep the JSON and flash record
+   updated together in the calibration apps.
+6. **Observability**: add a RO "boot info" register on page 3 (e.g.
+   logical `0x73`: record-found / CRC-ok / applied bits, sequence number)
+   in the register-map revision that ships self-loading, so the host can
+   distinguish self-loaded from host-loaded state without guessing.
+7. **Acceptance when it lands**: power-on with the Pi disconnected →
+   measured white is calibrated; corrupt the record (flip a byte) →
+   pass-through boot + host write still works; als-dimmer replay disabled
+   via config with no regression.
 
 ## 5. Open Questions (need owner decisions, none block SW-1)
 
