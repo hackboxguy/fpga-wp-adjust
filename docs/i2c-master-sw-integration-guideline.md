@@ -183,6 +183,12 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 
 ### Phase SW-1 — can be done NOW (no hardware dependency)
 
+> **Status (2026-06-13): SW-1 implemented.** 1.1 + 1.3 in br-wrapper commit
+> `546745c`; 1.2 in fpga-wp-adjust commit `00ee85a`; 1.4 in als-dimmer commit
+> `997787c` (full cmake build + gate-order smoke runs verified; Lattice
+> regression on real hardware remains a bench item). 1.5 is the documented
+> interim convention pending the factory serial feature (§4).
+
 | # | Repo | Task | Size |
 |---|---|---|---|
 | 1.1 | br-wrapper | **Byte-address fix** in `I2CDevWpAdjust.read16/write16` of all three children (`new-white-point-profile-child.py`, `d65-calibration-child.py`, `new-white-point-match-child.py`): send `(addr << 1) & 0xFF` instead of `addr & 0xFF` (the 2-bytes-per-register page-3 mapping, §1.2). Symptom if forgotten: ID read returns wrong/zero bytes. | 1 line × 3 files (+ docstring) |
