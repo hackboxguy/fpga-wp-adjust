@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import logging
 import time
@@ -27,6 +28,24 @@ from host.wp_registers import (
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parent / "schema" / "wp-cal-v1.schema.json"
 LOGGER = logging.getLogger(__name__)
 
+# Unattended boot loads enforce a plausibility window on raw gains so a
+# corrupt-but-schema-valid profile cannot black out or blow out the display.
+# The window is [unity/4, unity], i.e. [0.25, 1.0] in code-domain gain,
+# matching the v1 headroom-preserving calibration policy.
+GAIN_WINDOW_DIVISOR = 4
+
+_FORMAT_CHECKER = jsonschema.FormatChecker()
+if "date-time" not in _FORMAT_CHECKER.checkers:
+    # Without the optional rfc3339 validator package, jsonschema treats
+    # "format": "date-time" as annotation-only. Register a fallback so
+    # created_utc is always validated.
+    @_FORMAT_CHECKER.checks("date-time", raises=ValueError)
+    def _check_date_time(value: object) -> bool:
+        if not isinstance(value, str):
+            return True
+        datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return True
+
 
 @dataclass(frozen=True)
 class LoadResult:
@@ -46,7 +65,22 @@ def load_json(path: Path) -> Dict[str, Any]:
 def validate_profile(profile: Dict[str, Any], schema_path: Path = DEFAULT_SCHEMA_PATH) -> None:
     schema = load_json(schema_path)
     jsonschema.Draft7Validator.check_schema(schema)
-    jsonschema.Draft7Validator(schema).validate(profile)
+    jsonschema.Draft7Validator(schema, format_checker=_FORMAT_CHECKER).validate(profile)
+
+
+def check_gain_window(gains: Dict[str, int], frac_bits: int) -> None:
+    """Reject gains outside the boot-safe window [unity/4, unity]."""
+
+    unity = 1 << frac_bits
+    min_raw = unity // GAIN_WINDOW_DIVISOR
+    for channel in ("r", "g", "b"):
+        raw = int(gains[channel])
+        if raw < min_raw or raw > unity:
+            raise ValueError(
+                f"{channel} gain 0x{raw:04X} outside boot-safe window "
+                f"[0x{min_raw:04X}, 0x{unity:04X}]; "
+                f"use --allow-out-of-range-gains to override"
+            )
 
 
 def load_profile(path: Path, schema_path: Path = DEFAULT_SCHEMA_PATH) -> Dict[str, Any]:
@@ -59,6 +93,7 @@ def apply_profile(
     regs: WpAdjustRegisters,
     profile: Dict[str, Any],
     allow_pending_until_video: bool = True,
+    allow_out_of_range_gains: bool = False,
     timeout_sec: float = 0.0,
     poll_interval_sec: float = 0.02,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -70,13 +105,17 @@ def apply_profile(
     """
 
     expected_frac_bits = int(profile["fpga"].get("frac_bits", DEFAULT_FRAC_BITS))
+    gains = {channel: int(profile["gains"][channel]) for channel in ("r", "g", "b")}
+    if not allow_out_of_range_gains:
+        check_gain_window(gains, expected_frac_bits)
+
     status = regs.probe(expected_frac_bits=expected_frac_bits)
     if status.commit_pending:
         raise RuntimeError("refusing to load calibration while commit is already pending")
 
     offsets = profile.get("offsets", {})
     regs.write_calibration(
-        gains={channel: int(profile["gains"][channel]) for channel in ("r", "g", "b")},
+        gains=gains,
         offsets={channel: int(offsets.get(channel, 0)) for channel in ("r", "g", "b")},
         offset_enable=bool(offsets.get("enabled", False)),
         enable=True,
@@ -108,7 +147,7 @@ def make_dry_run_registers() -> WpAdjustRegisters:
     backend = DryRunBackend(
         reads={
             Register.ID: 0x57A1,
-            Register.VERSION: 0x0112,
+            Register.VERSION: 0x0113,
             Register.STATUS: 0x0C00,
         }
     )
@@ -177,6 +216,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Treat pending-until-video as a failure.",
     )
+    parser.add_argument(
+        "--allow-out-of-range-gains",
+        action="store_true",
+        help="Permit gains outside the boot-safe [unity/4, unity] window.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -190,6 +234,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             regs,
             profile,
             allow_pending_until_video=not args.strict_commit,
+            allow_out_of_range_gains=args.allow_out_of_range_gains,
             timeout_sec=args.timeout_sec,
             poll_interval_sec=max(0.001, args.poll_interval_sec),
         )

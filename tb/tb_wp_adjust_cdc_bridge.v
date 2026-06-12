@@ -77,8 +77,18 @@ module tb_wp_adjust_cdc_bridge;
         .cfg_rdata(cfg_rdata)
     );
 
-    initial bus_clk = 1'b0;
-    always #7 bus_clk = ~bus_clk;
+    // Bus-clock half period is overridable so `make test` can sweep ratios:
+    // slower bus (default 7), faster bus (+bus_half=3), and an integer-related
+    // 2:1 ratio (+bus_half=10) against the fixed 5ns pixel half period.
+    integer bus_half_period;
+    initial begin
+        if (!$value$plusargs("bus_half=%d", bus_half_period))
+            bus_half_period = 7;
+        $display("CDC bridge test: bus half period %0d ns, pix half period 5 ns",
+                 bus_half_period);
+        bus_clk = 1'b0;
+        forever #(bus_half_period) bus_clk = ~bus_clk;
+    end
 
     initial pix_clk = 1'b0;
     always #5 pix_clk = ~pix_clk;
@@ -232,7 +242,7 @@ module tb_wp_adjust_cdc_bridge;
         repeat (4) @(posedge pix_clk);
 
         expect_read(8'h70, 16'h57A1, "ID did not cross CDC bridge");
-        expect_read(8'h71, 16'h0112, "VERSION did not cross CDC bridge");
+        expect_read(8'h71, 16'h0113, "VERSION did not cross CDC bridge");
         expect_read(8'h72, 16'h0C00, "reset STATUS mismatch");
 
         bus_write(8'h00, 16'h0001);
@@ -275,6 +285,16 @@ module tb_wp_adjust_cdc_bridge;
         expect_read(8'h21, 16'h1000, "DEFAULTS did not restore active R");
         pulse_vsync(4);
         expect_read(8'h21, 16'h1000, "stale pending commit survived DEFAULTS");
+
+        bus_write(8'h01, 16'h0900);
+        bus_write(8'h7e, 16'hCA1B);
+        expect_status_bits(1'b1, 1'b0, "commit before cancel did not arm");
+        bus_write(8'h7e, 16'hC0FF);
+        expect_status_bits(1'b0, 1'b0, "cancel did not clear pending across bridge");
+        expect_read(8'h01, 16'h0900, "cancel corrupted shadow across bridge");
+        expect_read(8'h21, 16'h1000, "cancel changed active across bridge");
+        pulse_vsync(4);
+        expect_read(8'h21, 16'h1000, "cancelled commit latched across bridge");
 
         bus_write_held_req(8'h01, 16'h0700, "held bus_req re-fired write");
         expect_read(8'h01, 16'h0700, "held bus_req write did not land once");

@@ -112,7 +112,7 @@ Goal: keep the RTL behavior and logical register contract proven before board in
 Already covered by the committed directed bench:
 
 1. `ID = 0x57A1`.
-2. `VERSION = 0x0112`.
+2. `VERSION = 0x0113`.
 3. Shadow writes do not affect active values before `COMMIT`.
 4. `COMMIT` consumes only at filtered active-high `in_vsync`.
 5. `DEFAULTS` restores pass-through immediately and cancels pending commit.
@@ -354,7 +354,7 @@ Tasks:
 Exit criteria:
 
 1. Host can read `ID = 0x57A1`.
-2. Host can read `VERSION = 0x0112`.
+2. Host can read `VERSION = 0x0113`.
 3. Host can read `STATUS[15:8] = 12` for the default Q4.12 build.
 4. Shadow writes do not affect active registers before `COMMIT`.
 5. `COMMIT` is consumed only at filtered active-high `in_vsync`.
@@ -424,6 +424,14 @@ Planned files:
 ```text
 host/wp_calibrate.py
 ```
+
+For side-by-side pair matching, the calibration/matching tool should port the
+proven operator-procedure logic from the legacy `br-wrapper` disp-tester
+scripts (reference/target flow, profile-sweep slope seeding, spotread
+robustness) onto the new register map and solver — see "Follow-Up: Port The
+Legacy disp-tester Procedure Logic" in `docs/pair-matching.md`. That port
+lives in the `br-wrapper` repository and is gated on B2/B3 hardware bring-up
+of the new RTL.
 
 Tasks:
 

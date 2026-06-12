@@ -32,9 +32,9 @@ a rising edge while `bus_busy` is low.
 | `0x25` | `G_OFFSET_ACTIVE` | RO | Active green offset |
 | `0x26` | `B_OFFSET_ACTIVE` | RO | Active blue offset |
 | `0x70` | `ID` | RO | `16'h57A1` |
-| `0x71` | `VERSION` | RO | `16'h0112` |
+| `0x71` | `VERSION` | RO | `16'h0113` |
 | `0x72` | `STATUS` | RO | Status and gain fractional-bit field |
-| `0x7E` | `COMMIT` | WO | Write `16'hCA1B` to arm frame-boundary commit |
+| `0x7E` | `COMMIT` | WO | Write `16'hCA1B` to arm frame-boundary commit; write `16'hC0FF` to cancel an armed commit |
 | `0x7F` | `DEFAULTS` | WO | Write `16'hD65D` to restore pass-through immediately |
 
 ## CONTROL
@@ -55,7 +55,9 @@ Default gain format is unsigned Q4.12:
 ```text
 unity = 1.0 = 16'h1000
 0.5   = 16'h0800
-1.5   = 16'h1800
+1.5   = 16'h1800  (format example only; above-unity gains are outside the
+                   v1 headroom-preserving calibration policy and the boot
+                   loader's default safety window)
 ```
 
 `STATUS[15:8]` reports `FRAC_BITS` and is the authoritative fractional-bit count for host software.
@@ -73,13 +75,16 @@ unity = 1.0 = 16'h1000
 
 ## Commit Semantics
 
-`COMMIT` arms an update. It does not snapshot the shadow registers immediately. Active registers latch from shadow registers at the next filtered rising edge of active-high `in_vsync`.
+`COMMIT` arms an update. It does not snapshot the shadow registers immediately. Active registers latch from shadow registers at the next filtered rising edge of active-high `in_vsync` (or the filtered active edge when the RTL is built with `VSYNC_ACTIVE_HIGH=0`).
 
 Host software must not write new shadow values while `STATUS[0]` is set.
 
+Writing `16'hC0FF` to `COMMIT` cancels an armed commit: `STATUS[0]` and `STATUS[1]` clear, and shadow and active registers are left untouched. This is the way to abandon staged values without losing the active calibration (`DEFAULTS` resets both). A cancel that races the commit vsync edge may arrive after the update has latched; read the active registers after canceling when that matters. The cancel magic is new in revision `0x13`; on revision `0x12` hardware it is ignored.
+
 ## VERSION
 
-`VERSION = 16'h0112`:
+`VERSION = 16'h0113`:
 
 - bits 15:8: register-map major version, `8'h01` for scalar v1
-- bits 7:0: implementation revision, `8'h12`
+- bits 7:0: implementation revision, `8'h13`; `0x13` adds `COMMIT` cancel
+  (`16'hC0FF`) and the `VSYNC_ACTIVE_HIGH`/`GATE_BLANKING` build parameters

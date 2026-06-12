@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Register-map implementation revision bumped to `0x13` (`VERSION = 0x0113`): writing `0xC0FF` to `COMMIT` now cancels an armed commit while preserving shadow and active registers (previously only `DEFAULTS` could clear a pending commit, destroying calibration). Host adds `WpAdjustRegisters.cancel_commit()`; mock backend and testbenches updated.
+- Added elaboration-time parameter guards: `FRAC_BITS` outside [2,15] or `PIXEL_BITS` outside [4,15] now fail synthesis/elaboration with a self-describing error instead of producing silently broken hardware (e.g. `FRAC_BITS=16` overflowed unity gain to zero). `make guard-check` (part of `synth-check`) asserts the failures.
+- Added opt-in integration parameters, both defaulting to existing behavior: `VSYNC_ACTIVE_HIGH=0` commits on the filtered active edge of an active-low vsync (`out_vsync` keeps input polarity); `GATE_BLANKING=1` forces RGB outputs to zero when delayed DE is low. Covered by the new `tb/tb_wp_adjust_options.v`.
+- Added parameter-generic testbench `tb/tb_wp_adjust_params.v` (reference-model driven); `make test` now runs it at 10/12, 8/10, and 12/14 PIXEL_BITS/FRAC_BITS.
+- Host calibration writes now read back shadow registers and compare before issuing `COMMIT`, so transport-corrupted writes fail closed (`write_calibration(verify=...)`); `DryRunBackend` echoes writes into subsequent reads to match.
+- Boot loader enforces a boot-safe gain window of `[unity/4, unity]` by default; `--allow-out-of-range-gains` overrides explicitly. Out-of-window gains fail before any register write.
+- Calibration JSON `created_utc` is now actually format-validated (`date-time`), with a built-in fallback checker when the optional rfc3339 validator package is absent.
+- Added randomized datapath co-simulation against an in-testbench reference model (extreme and random gain/offset/enable configurations), an exact 2-cycle latency/alignment test, a `MAX_PIXEL+1` saturation corner test, and negative register-interface tests (RO writes, wrong magics, unknown addresses). Mutation-checked against rounding, saturation, and channel-swap faults.
+- CDC bridge testbench now sweeps bus/pixel clock ratios (slower, faster, and integer-related) via `+bus_half=` plusarg; `make test` runs all three.
+- Added `ASYNC_REG`/`syn_preserve` attributes to the CDC bridge synchronizer flops and documented the required SDC constraints in the integration guide.
+- Integration guide additions: blanking-interval behavior contract, quantization/banding guidance, commit-edge polarity bring-up check, and shadow readback-verify step in the register update flow.
+- Added `docs/pair-matching.md`: side-by-side display matching workflow (relative target selection, luminance co-matching, pair-delta acceptance, gray-ramp checks) and the planned port of the legacy br-wrapper disp-tester procedure logic.
 - Added host-side calibration math helpers and unit tests for Q-format conversion, seed reproduction, xyY/XYZ conversion, gain normalization, and safety limits.
 - Added host-side logical register adapter with mock and dry-run backends.
 - Added host-side boot loader with schema validation, dry-run/mock backends, bounded commit polling, controlled failure handling, and pending-until-video handling.

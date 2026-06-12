@@ -197,9 +197,9 @@ The exact FPGA I2C slave address may be changed to fit the existing design. The 
 | `0x25` | `G_OFFSET_ACTIVE` | RO | Active green offset |
 | `0x26` | `B_OFFSET_ACTIVE` | RO | Active blue offset |
 | `0x70` | `ID` | RO | `0x57A1`, identifies the v1 white-point block |
-| `0x71` | `VERSION` | RO | `0x0112`; bits 15:8 are register-map major version `0x01`, bits 7:0 are implementation revision `0x12` |
+| `0x71` | `VERSION` | RO | `0x0113`; bits 15:8 are register-map major version `0x01`, bits 7:0 are implementation revision `0x13` |
 | `0x72` | `STATUS` | RO | Bit 0 commit pending, bit 1 commit consumed, bit 2 active gain enable, bit 3 active offset enable, bits 15:8 `FRAC_BITS` |
-| `0x7E` | `COMMIT` | WO | Write `0xCA1B`; shadow values latch to active on the next filtered rising edge of active-high `in_vsync` |
+| `0x7E` | `COMMIT` | WO | Write `0xCA1B`; shadow values latch to active on the next filtered rising edge of active-high `in_vsync`. Write `0xC0FF` to cancel an armed commit without touching shadow/active values (revision `0x13`+) |
 | `0x7F` | `DEFAULTS` | WO | Write `0xD65D`; restore identity/pass-through defaults immediately |
 
 The implementation may integrate these logical fields into a larger existing register file. Host tooling shall isolate transport details in `wp_registers.py` so outer I2C address changes do not affect calibration math.
@@ -221,6 +221,7 @@ Deferred commit contract:
 4. Host software shall wait for `STATUS[1]` commit consumed, or wait at least one known-good frame after video is running, before starting another update.
 5. If video/vsync is not running, `STATUS[0]` may remain set indefinitely. The boot loader shall treat this as "pending until video starts," not as an immediate write failure.
 6. `DEFAULTS` is intentionally immediate so it can act as a panic-to-safe path. If used during active video, it may cause a partial-frame visual seam.
+7. An armed commit can be abandoned with the `COMMIT` cancel magic `0xC0FF` (revision `0x13`+), which clears `STATUS[0]`/`STATUS[1]` and preserves both shadow and active registers. Use this instead of `DEFAULTS` when staged values are wrong but the active calibration must be kept.
 
 ## 10. Initial Gain Estimate From Existing Data
 

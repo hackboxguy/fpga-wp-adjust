@@ -8,9 +8,10 @@ from typing import Dict, List, Optional, Protocol, Tuple
 
 
 WP_ADJUST_ID = 0x57A1
-WP_ADJUST_VERSION = 0x0112
+WP_ADJUST_VERSION = 0x0113
 WP_ADJUST_VERSION_MAJOR = WP_ADJUST_VERSION >> 8
 COMMIT_MAGIC = 0xCA1B
+COMMIT_CANCEL_MAGIC = 0xC0FF
 DEFAULTS_MAGIC = 0xD65D
 DEFAULT_FRAC_BITS = 12
 UNITY_GAIN_Q4_12 = 0x1000
@@ -79,7 +80,12 @@ class Transaction:
 
 
 class DryRunBackend:
-    """Backend that records logical transactions and returns configured reads."""
+    """Backend that records logical transactions without touching hardware.
+
+    Reads return the last value written to the same address, falling back to
+    the configured ``reads`` map, so write-then-verify sequences behave the
+    same as on a real register bank.
+    """
 
     def __init__(self, reads: Optional[Dict[int, int]] = None):
         self.reads = dict(reads or {})
@@ -95,6 +101,7 @@ class DryRunBackend:
         addr = _u8(addr)
         value = _u16(value)
         self.transactions.append(Transaction("write", addr, value))
+        self.reads[addr] = value
 
 
 class MockWpAdjustBackend:
@@ -174,6 +181,9 @@ class MockWpAdjustBackend:
         elif reg == Register.COMMIT and value == COMMIT_MAGIC:
             self.commit_pending = True
             self.commit_consumed = False
+        elif reg == Register.COMMIT and value == COMMIT_CANCEL_MAGIC:
+            self.commit_pending = False
+            self.commit_consumed = False
         elif reg == Register.DEFAULTS and value == DEFAULTS_MAGIC:
             self._reset_registers()
 
@@ -245,8 +255,48 @@ class WpAdjustRegisters:
                 raise RuntimeError("refusing to COMMIT while previous commit is pending")
         self.write(Register.COMMIT, COMMIT_MAGIC)
 
+    def cancel_commit(self) -> None:
+        """Cancel an armed commit; shadow and active registers are untouched.
+
+        A cancel racing the commit vsync edge may arrive after the update has
+        latched; read the active registers afterwards when that matters.
+        Requires register-map revision 0x0113 or later (no-op on 0x0112).
+        """
+
+        self.write(Register.COMMIT, COMMIT_CANCEL_MAGIC)
+
     def defaults(self) -> None:
         self.write(Register.DEFAULTS, DEFAULTS_MAGIC)
+
+    def verify_shadow(
+        self,
+        gains: Dict[str, int],
+        offsets: Dict[str, int],
+        enable: bool,
+        offset_enable: bool,
+    ) -> None:
+        """Read back shadow registers and compare against the intended values.
+
+        Catches transport-level corruption (e.g. a lost or garbled I2C write)
+        before the values are committed to the active datapath.
+        """
+
+        expected = [
+            (Register.R_GAIN_SHADOW, _u16(gains["r"])),
+            (Register.G_GAIN_SHADOW, _u16(gains["g"])),
+            (Register.B_GAIN_SHADOW, _u16(gains["b"])),
+            (Register.R_OFFSET_SHADOW, _signed16_to_u16(offsets["r"])),
+            (Register.G_OFFSET_SHADOW, _signed16_to_u16(offsets["g"])),
+            (Register.B_OFFSET_SHADOW, _signed16_to_u16(offsets["b"])),
+            (Register.CONTROL_SHADOW, (1 if enable else 0) | (2 if offset_enable else 0)),
+        ]
+        for reg, want in expected:
+            got = self.read(reg)
+            if got != want:
+                raise RuntimeError(
+                    f"shadow readback mismatch at {reg.name}: "
+                    f"wrote 0x{want:04X}, read 0x{got:04X}; not committing"
+                )
 
     def write_calibration(
         self,
@@ -254,6 +304,7 @@ class WpAdjustRegisters:
         offsets: Optional[Dict[str, int]] = None,
         offset_enable: bool = False,
         enable: bool = True,
+        verify: bool = True,
     ) -> None:
         status = self.read_status()
         if status.commit_pending:
@@ -264,6 +315,13 @@ class WpAdjustRegisters:
             offsets = {"r": 0, "g": 0, "b": 0}
         self.write_shadow_offsets(offsets)
         self.write_control(enable=enable, offset_enable=offset_enable)
+        if verify:
+            self.verify_shadow(
+                gains=gains,
+                offsets=offsets,
+                enable=enable,
+                offset_enable=offset_enable,
+            )
         self.commit(check_pending=False)
 
 

@@ -22,6 +22,14 @@
 //   Request and acknowledge toggles cross through two-flop synchronizers. The
 //   multi-bit request and response payloads are held stable until the matching
 //   toggle returns, so the destination domain samples stable values only.
+//
+// Synthesis/timing constraints (see docs/integration-guide.md for details):
+//   - The *_meta/*_sync synchronizer flops carry ASYNC_REG/syn_preserve
+//     attributes; keep them adjacent and exempt from retiming.
+//   - The quasi-static payload buses (req_we_hold/req_addr_hold/
+//     req_wdata_hold into pix_clk, pix_rdata_hold into bus_clk) need a
+//     set_false_path or set_max_delay -datapath_only constraint so payload
+//     skew stays within the toggle round-trip assumption.
 
 module wp_adjust_cdc_bridge (
     input  wire        bus_clk,
@@ -48,14 +56,18 @@ module wp_adjust_cdc_bridge (
 
     reg        req_toggle_bus;
     reg        bus_req_d;
+    (* ASYNC_REG = "TRUE", syn_preserve = 1 *)
     reg        ack_toggle_bus_meta;
+    (* ASYNC_REG = "TRUE", syn_preserve = 1 *)
     reg        ack_toggle_bus_sync;
     reg        ack_toggle_bus_seen;
     reg        req_we_hold;
     reg [7:0]  req_addr_hold;
     reg [15:0] req_wdata_hold;
 
+    (* ASYNC_REG = "TRUE", syn_preserve = 1 *)
     reg        req_toggle_pix_meta;
+    (* ASYNC_REG = "TRUE", syn_preserve = 1 *)
     reg        req_toggle_pix_sync;
     reg        req_toggle_pix_seen;
     reg        ack_toggle_pix;

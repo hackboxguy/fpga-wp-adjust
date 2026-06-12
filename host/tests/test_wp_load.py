@@ -58,7 +58,7 @@ def test_dry_run_loader_emits_expected_logical_sequence():
     assert result.state == "commit_status_unknown"
     assert transaction_summary(result.transactions) == [
         ("read", Register.ID, 0x57A1),
-        ("read", Register.VERSION, 0x0112),
+        ("read", Register.VERSION, 0x0113),
         ("read", Register.STATUS, 0x0C00),
         ("read", Register.STATUS, 0x0C00),
         ("write", Register.R_GAIN_SHADOW, 0x0F19),
@@ -68,6 +68,13 @@ def test_dry_run_loader_emits_expected_logical_sequence():
         ("write", Register.G_OFFSET_SHADOW, 0),
         ("write", Register.B_OFFSET_SHADOW, 0),
         ("write", Register.CONTROL_SHADOW, 1),
+        ("read", Register.R_GAIN_SHADOW, 0x0F19),
+        ("read", Register.G_GAIN_SHADOW, 0x1000),
+        ("read", Register.B_GAIN_SHADOW, 0x0EC3),
+        ("read", Register.R_OFFSET_SHADOW, 0),
+        ("read", Register.G_OFFSET_SHADOW, 0),
+        ("read", Register.B_OFFSET_SHADOW, 0),
+        ("read", Register.CONTROL_SHADOW, 1),
         ("write", Register.COMMIT, 0xCA1B),
         ("read", Register.STATUS, 0x0C00),
     ]
@@ -140,6 +147,79 @@ def test_offsets_enabled_are_loaded_from_profile():
     assert regs.read(Register.CONTROL_ACTIVE) == 0x0003
     assert regs.read(Register.R_OFFSET_ACTIVE) == 0xFFEC
     assert regs.read(Register.B_OFFSET_ACTIVE) == 0x000A
+
+
+def test_loader_rejects_gains_outside_boot_safe_window():
+    profile = copy.deepcopy(_seed_profile())
+    profile["gains"]["g"] = 0
+    regs = make_mock_registers()
+
+    with pytest.raises(ValueError, match="outside boot-safe window"):
+        apply_profile(regs, profile)
+
+    assert regs.backend.transactions == []
+
+
+def test_loader_rejects_above_unity_gains_by_default():
+    profile = copy.deepcopy(_seed_profile())
+    profile["gains"]["r"] = 0x1001
+
+    with pytest.raises(ValueError, match="outside boot-safe window"):
+        apply_profile(make_mock_registers(), profile)
+
+
+def test_loader_accepts_out_of_range_gains_with_explicit_override():
+    profile = copy.deepcopy(_seed_profile())
+    profile["gains"]["r"] = 0x1800
+    regs = make_mock_registers()
+
+    result = apply_profile(regs, profile, allow_out_of_range_gains=True)
+
+    assert result.state == "pending_until_video"
+    assert regs.read(Register.R_GAIN_SHADOW) == 0x1800
+
+
+def test_loader_accepts_window_boundary_gains():
+    profile = copy.deepcopy(_seed_profile())
+    profile["gains"] = {"r": 0x0400, "g": 0x1000, "b": 0x1000}
+
+    result = apply_profile(make_mock_registers(), profile)
+
+    assert result.state == "pending_until_video"
+
+
+def test_validate_profile_rejects_invalid_created_utc():
+    profile = _seed_profile()
+    profile["created_utc"] = "not-a-timestamp"
+
+    with pytest.raises(Exception):
+        validate_profile(profile)
+
+
+def test_cli_out_of_range_gains_return_controlled_failure(tmp_path, caplog):
+    caplog.set_level(logging.ERROR)
+    profile = _seed_profile()
+    profile["gains"]["b"] = 0
+    bad_profile = tmp_path / "zero-gain.json"
+    bad_profile.write_text(json.dumps(profile), encoding="utf-8")
+
+    rc = main(["--cal", str(bad_profile), "--dry-run"])
+
+    assert rc == 3
+    assert "outside boot-safe window" in caplog.text
+
+
+def test_cli_allow_out_of_range_gains_flag(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    profile = _seed_profile()
+    profile["gains"]["b"] = 0x1400
+    boosted = tmp_path / "boosted.json"
+    boosted.write_text(json.dumps(profile), encoding="utf-8")
+
+    rc = main(["--cal", str(boosted), "--dry-run", "--allow-out-of-range-gains"])
+
+    assert rc == 0
+    assert "write 0x03 0x1400" in caplog.text
 
 
 def test_cli_dry_run_logs_state_and_transactions(caplog):

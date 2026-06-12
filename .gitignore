@@ -8,3 +8,7 @@ __pycache__/
 *.jou
 *.log
 *.rpt
+
+# Local snapshot of the legacy br-wrapper repo and measured profile data;
+# referenced by docs/fable-review.md and docs/pair-matching.md, not vendored.
+tmp-folder/

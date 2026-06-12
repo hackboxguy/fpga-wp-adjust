@@ -13,8 +13,20 @@
 // driven by an existing I2C register slave in the pixel clock domain. If the
 // I2C slave uses a different clock, synchronize cfg_wr_en/cfg_addr/cfg_wdata
 // before connecting them here. COMMIT copies shadow registers to active
-// registers after the next filtered rising edge of in_vsync. in_vsync is
-// expected to be active-high and synchronous to clk.
+// registers after the next filtered rising edge of the (polarity-adjusted)
+// in_vsync. in_vsync must be synchronous to clk; set VSYNC_ACTIVE_HIGH=0 if
+// the integration's vsync is active-low (only commit timing is affected; the
+// delayed out_vsync always carries the original polarity).
+//
+// Parameters:
+//   PIXEL_BITS        pixel width per channel, supported range [4, 15]
+//   FRAC_BITS         gain fractional bits, supported range [2, 15];
+//                     out-of-range values fail at elaboration
+//   VSYNC_ACTIVE_HIGH 1 (default): commit on filtered rising edge of in_vsync
+//                     0: commit on filtered falling edge (active-low vsync)
+//   GATE_BLANKING     0 (default): pixel math runs during blanking, so
+//                     blanking-interval RGB values are not preserved
+//                     1: out_r/g/b are forced to zero when delayed DE is low
 //
 // Register map, 16-bit data:
 //   0x00 CONTROL shadow
@@ -35,9 +47,9 @@
 //   0x25 G_OFFSET active, read-only
 //   0x26 B_OFFSET active, read-only
 //   0x70 ID, read-only, 16'h57A1
-//   0x71 VERSION, read-only, 16'h0112
+//   0x71 VERSION, read-only, 16'h0113
 //        bits 15:8: register-map major version, 8'h01 = scalar v1
-//        bits  7:0: implementation revision, 8'h12
+//        bits  7:0: implementation revision, 8'h13
 //   0x72 STATUS, read-only
 //        bit 0: commit pending
 //        bit 1: last commit consumed on vsync, sticky until next COMMIT/DEFAULTS
@@ -45,7 +57,11 @@
 //        bit 3: active offsets enabled
 //        bits 15:8: FRAC_BITS
 //   0x7e COMMIT: write 16'hCA1B to copy shadow registers to active on the
-//        next filtered rising edge of active-high in_vsync.
+//        next filtered active edge of in_vsync.
+//        Write 16'hC0FF to cancel an armed commit; shadow and active
+//        registers are left untouched. A cancel that races the commit vsync
+//        edge may arrive after the update has latched; read the active
+//        registers after canceling to confirm.
 //        Do not write new shadow values while STATUS[0] is set.
 //   0x7f DEFAULTS: write 16'hD65D to restore unity/pass-through defaults immediately
 //
@@ -57,7 +73,9 @@
 
 module wp_adjust #(
     parameter PIXEL_BITS = 10,
-    parameter FRAC_BITS  = 12
+    parameter FRAC_BITS  = 12,
+    parameter VSYNC_ACTIVE_HIGH = 1,
+    parameter GATE_BLANKING = 0
 ) (
     input  wire                  clk,
     input  wire                  rst_n,
@@ -85,7 +103,21 @@ module wp_adjust #(
     localparam COEFF_BITS = 16;
     localparam ACC_BITS = PIXEL_BITS + COEFF_BITS + 4;
     localparam [15:0] WP_ADJUST_ID = 16'h57A1;
-    localparam [15:0] WP_ADJUST_VERSION = 16'h0112;
+    localparam [15:0] WP_ADJUST_VERSION = 16'h0113;
+
+    // Elaboration-time parameter guards. Out-of-range parameters reference a
+    // module that intentionally does not exist, so elaboration/synthesis
+    // fails with the range encoded in the error message instead of producing
+    // silently broken hardware (e.g. FRAC_BITS=16 would overflow UNITY_GAIN
+    // to zero and reset to a black screen).
+    generate
+        if (FRAC_BITS < 2 || FRAC_BITS > 15) begin : gen_frac_bits_range_check
+            wp_adjust_ERROR_FRAC_BITS_supported_range_is_2_to_15 u_frac_bits_guard();
+        end
+        if (PIXEL_BITS < 4 || PIXEL_BITS > 15) begin : gen_pixel_bits_range_check
+            wp_adjust_ERROR_PIXEL_BITS_supported_range_is_4_to_15 u_pixel_bits_guard();
+        end
+    endgenerate
     localparam [7:0] FRAC_BITS_BYTE = FRAC_BITS;
     localparam [COEFF_BITS-1:0] UNITY_GAIN =
         ({{(COEFF_BITS-1){1'b0}}, 1'b1} << FRAC_BITS);
@@ -161,6 +193,10 @@ module wp_adjust #(
     wire signed [ACC_BITS-1:0] b_passthrough_q =
         $signed({{(ACC_BITS-PIXEL_BITS){1'b0}}, in_b}) <<< FRAC_BITS;
 
+    // Commit timing uses the polarity-adjusted vsync; the datapath delay of
+    // out_vsync is taken from the raw in_vsync and keeps the input polarity.
+    wire vsync_commit_level = (VSYNC_ACTIVE_HIGH != 0) ? in_vsync : ~in_vsync;
+
     wire vsync_filtered = vsync_filter_s0 & vsync_filter_s1;
     wire vsync_rise = vsync_filtered & ~vsync_filtered_d;
 
@@ -189,7 +225,7 @@ module wp_adjust #(
             vsync_filter_s1      <= 1'b0;
             vsync_filtered_d     <= 1'b0;
         end else begin
-            vsync_filter_s0  <= in_vsync;
+            vsync_filter_s0  <= vsync_commit_level;
             vsync_filter_s1  <= vsync_filter_s0;
             vsync_filtered_d <= vsync_filtered;
 
@@ -222,6 +258,11 @@ module wp_adjust #(
                     8'h7e: begin
                         if (cfg_wdata == 16'hCA1B) begin
                             commit_pending  <= 1'b1;
+                            commit_consumed <= 1'b0;
+                        end else if (cfg_wdata == 16'hC0FF) begin
+                            // Cancel an armed commit; shadow and active
+                            // registers are left untouched.
+                            commit_pending  <= 1'b0;
                             commit_consumed <= 1'b0;
                         end
                     end
@@ -326,9 +367,15 @@ module wp_adjust #(
                 b_offset_s1 <= {ACC_BITS{1'b0}};
             end
 
-            out_r     <= sat_round_to_pixel(r_scaled_s1 + r_offset_s1);
-            out_g     <= sat_round_to_pixel(g_scaled_s1 + g_offset_s1);
-            out_b     <= sat_round_to_pixel(b_scaled_s1 + b_offset_s1);
+            if (GATE_BLANKING != 0 && !de_s1) begin
+                out_r <= {PIXEL_BITS{1'b0}};
+                out_g <= {PIXEL_BITS{1'b0}};
+                out_b <= {PIXEL_BITS{1'b0}};
+            end else begin
+                out_r <= sat_round_to_pixel(r_scaled_s1 + r_offset_s1);
+                out_g <= sat_round_to_pixel(g_scaled_s1 + g_offset_s1);
+                out_b <= sat_round_to_pixel(b_scaled_s1 + b_offset_s1);
+            end
             out_de    <= de_s1;
             out_hsync <= hsync_s1;
             out_vsync <= vsync_s1;

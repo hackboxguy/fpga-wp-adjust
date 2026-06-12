@@ -20,8 +20,9 @@ tb/
   tb_wp_adjust.v           # self-checking directed Verilog testbench
   tb_wp_adjust_cdc_bridge.v # async-clock register bridge testbench
 docs/
-  integration-guide.md     # FPGA integration contract and bring-up notes
+  integration-guide.md     # FPGA integration contract, CDC constraints, bring-up notes
   register-map.md          # logical register interface
+  pair-matching.md         # side-by-side display matching workflow
   wp-adjust-prd.md         # project PRD and future extension roadmap
 host/
   README.md                # planned Pi/host tooling boundary

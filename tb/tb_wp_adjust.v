@@ -142,6 +142,107 @@ module tb_wp_adjust;
         end
     endtask
 
+    integer rand_seed;
+    integer cfg_i;
+    reg [15:0] rnd_r_gain;
+    reg [15:0] rnd_g_gain;
+    reg [15:0] rnd_b_gain;
+    reg [15:0] rnd_r_offset;
+    reg [15:0] rnd_g_offset;
+    reg [15:0] rnd_b_offset;
+    reg rnd_enable;
+    reg rnd_offset_enable;
+
+    // Reference model mirroring the wp_adjust datapath contract:
+    // scale (or pass through in Q form), optionally add offset in Q form,
+    // clamp negative to zero, round half-up at the Q point, saturate high.
+    function [PIXEL_BITS-1:0] ref_pixel;
+        input [PIXEL_BITS-1:0] pix;
+        input [15:0] gain;
+        input [15:0] offset;
+        input enable;
+        input offset_enable;
+        reg signed [63:0] acc;
+        begin
+            if (enable)
+                acc = pix * gain;
+            else
+                acc = pix << FRAC_BITS;
+            if (enable && offset_enable)
+                acc = acc + ($signed(offset) <<< FRAC_BITS);
+
+            if (acc <= 0) begin
+                ref_pixel = {PIXEL_BITS{1'b0}};
+            end else begin
+                acc = (acc + (64'sd1 << (FRAC_BITS - 1))) >>> FRAC_BITS;
+                if (acc > $signed({{(64-PIXEL_BITS){1'b0}}, MAX_PIXEL}))
+                    ref_pixel = MAX_PIXEL;
+                else
+                    ref_pixel = acc[PIXEL_BITS-1:0];
+            end
+        end
+    endfunction
+
+    task apply_random_config;
+        input [15:0] r_gain;
+        input [15:0] g_gain;
+        input [15:0] b_gain;
+        input [15:0] r_offset;
+        input [15:0] g_offset;
+        input [15:0] b_offset;
+        input enable;
+        input offset_enable;
+        begin
+            write_reg(8'h00, {14'd0, offset_enable, enable});
+            write_reg(8'h01, r_gain);
+            write_reg(8'h02, g_gain);
+            write_reg(8'h03, b_gain);
+            write_reg(8'h04, r_offset);
+            write_reg(8'h05, g_offset);
+            write_reg(8'h06, b_offset);
+            apply_commit();
+        end
+    endtask
+
+    task check_random_pixels;
+        input [15:0] r_gain;
+        input [15:0] g_gain;
+        input [15:0] b_gain;
+        input [15:0] r_offset;
+        input [15:0] g_offset;
+        input [15:0] b_offset;
+        input enable;
+        input offset_enable;
+        input integer pixel_count;
+        integer pix_i;
+        reg [PIXEL_BITS-1:0] r;
+        reg [PIXEL_BITS-1:0] g;
+        reg [PIXEL_BITS-1:0] b;
+        begin
+            for (pix_i = 0; pix_i < pixel_count; pix_i = pix_i + 1) begin
+                if (pix_i == 0) begin
+                    r = {PIXEL_BITS{1'b0}};
+                    g = MAX_PIXEL;
+                    b = {PIXEL_BITS{1'b0}};
+                end else if (pix_i == 1) begin
+                    r = MAX_PIXEL;
+                    g = {PIXEL_BITS{1'b0}};
+                    b = MAX_PIXEL;
+                end else begin
+                    r = $random(rand_seed);
+                    g = $random(rand_seed);
+                    b = $random(rand_seed);
+                end
+                drive_pixel_and_wait(r, g, b);
+                expect_pixel(
+                    ref_pixel(r, r_gain, r_offset, enable, offset_enable),
+                    ref_pixel(g, g_gain, g_offset, enable, offset_enable),
+                    ref_pixel(b, b_gain, b_offset, enable, offset_enable),
+                    "randomized co-sim mismatch");
+            end
+        end
+    endtask
+
     initial begin
         rst_n = 1'b0;
         in_r = {PIXEL_BITS{1'b0}};
@@ -163,7 +264,7 @@ module tb_wp_adjust;
         if (cfg_rdata !== 16'h57A1) fail("ID register mismatch");
         cfg_addr = 8'h71;
         #1;
-        if (cfg_rdata !== 16'h0112) fail("VERSION register mismatch");
+        if (cfg_rdata !== 16'h0113) fail("VERSION register mismatch");
 
         drive_pixel_and_wait(10'd123, 10'd456, 10'd789);
         expect_pixel(10'd123, 10'd456, 10'd789, "reset/default pass-through");
@@ -197,6 +298,10 @@ module tb_wp_adjust;
 
         drive_pixel_and_wait(10'd800, 10'd100, 10'd100);
         expect_pixel(MAX_PIXEL, 10'd100, 10'd100, "over-range saturates");
+        // 512 * 2.0 = 1024 = MAX_PIXEL + 1: the smallest over-range result
+        // must saturate, not wrap to zero.
+        drive_pixel_and_wait(10'd512, 10'd100, 10'd100);
+        expect_pixel(MAX_PIXEL, 10'd100, 10'd100, "max-plus-one saturates without wrap");
 
         write_reg(8'h00, 16'h0001);
         write_reg(8'h01, 16'h0800);
@@ -265,6 +370,133 @@ module tb_wp_adjust;
         expect_status(1'b0, 1'b1, "sustained vsync did not consume commit");
         drive_pixel_and_wait(10'd100, 10'd100, 10'd100);
         expect_pixel(10'd50, 10'd100, 10'd100, "sustained vsync applied commit");
+
+        // COMMIT_CANCEL: clears an armed commit without touching shadow or
+        // active registers.
+        write_reg(8'h7f, 16'hD65D);
+        write_reg(8'h00, 16'h0001);
+        write_reg(8'h01, 16'h0C00); // R = 0.75
+        write_reg(8'h02, 16'h1000);
+        write_reg(8'h03, 16'h1000);
+        apply_commit();
+
+        write_reg(8'h01, 16'h0A00); // stage a new value, then cancel
+        write_reg(8'h7e, 16'hCA1B);
+        @(posedge clk);
+        expect_status(1'b1, 1'b0, "commit before cancel did not arm");
+        write_reg(8'h7e, 16'hC0FF);
+        expect_status(1'b0, 1'b0, "cancel did not clear pending commit");
+        cfg_addr = 8'h01;
+        #1;
+        if (cfg_rdata !== 16'h0A00) fail("cancel corrupted shadow register");
+        cfg_addr = 8'h21;
+        #1;
+        if (cfg_rdata !== 16'h0C00) fail("cancel corrupted active register");
+        pulse_vsync(4);
+        cfg_addr = 8'h21;
+        #1;
+        if (cfg_rdata !== 16'h0C00) fail("cancelled commit still latched on vsync");
+        write_reg(8'h7e, 16'hCA1B); // re-arm: preserved shadow must latch
+        pulse_vsync(4);
+        expect_status(1'b0, 1'b1, "re-armed commit after cancel did not consume");
+        cfg_addr = 8'h21;
+        #1;
+        if (cfg_rdata !== 16'h0A00) fail("re-armed commit did not latch preserved shadow");
+
+        // V5: negative register-interface tests.
+        write_reg(8'h7f, 16'hD65D);
+        cfg_addr = 8'h50;
+        #1;
+        if (cfg_rdata !== 16'd0) fail("unknown address did not read zero");
+
+        write_reg(8'h21, 16'h0123); // write to read-only active register
+        cfg_addr = 8'h21;
+        #1;
+        if (cfg_rdata !== 16'h1000) fail("write to RO active register was not ignored");
+        cfg_addr = 8'h01;
+        #1;
+        if (cfg_rdata !== 16'h1000) fail("write to RO address corrupted shadow");
+
+        write_reg(8'h7e, 16'h1234); // wrong COMMIT magic
+        expect_status(1'b0, 1'b0, "wrong COMMIT magic armed a commit");
+
+        write_reg(8'h01, 16'h0ABC);
+        write_reg(8'h7f, 16'hD65E); // wrong DEFAULTS magic
+        cfg_addr = 8'h01;
+        #1;
+        if (cfg_rdata !== 16'h0ABC) fail("wrong DEFAULTS magic reset shadow registers");
+        write_reg(8'h7f, 16'hD65D);
+        cfg_addr = 8'h01;
+        #1;
+        if (cfg_rdata !== 16'h1000) fail("DEFAULTS did not restore shadow after negative test");
+
+        // V3: exact 2-cycle latency and pixel/sync alignment in pass-through.
+        @(negedge clk);
+        in_r = {PIXEL_BITS{1'b0}};
+        in_g = {PIXEL_BITS{1'b0}};
+        in_b = {PIXEL_BITS{1'b0}};
+        in_de = 1'b0;
+        in_hsync = 1'b0;
+        in_vsync = 1'b0;
+        repeat (4) @(posedge clk);
+        #1;
+        if (out_de !== 1'b0) fail("latency pretest: out_de not idle");
+        @(negedge clk);
+        in_r = 10'd77;
+        in_g = 10'd88;
+        in_b = 10'd99;
+        in_de = 1'b1;
+        in_hsync = 1'b1;
+        @(negedge clk);
+        in_r = {PIXEL_BITS{1'b0}};
+        in_g = {PIXEL_BITS{1'b0}};
+        in_b = {PIXEL_BITS{1'b0}};
+        in_de = 1'b0;
+        in_hsync = 1'b0;
+        #1;
+        if (out_de !== 1'b0) fail("DE appeared before 2-cycle latency");
+        @(posedge clk);
+        #1;
+        if (out_de !== 1'b1 || out_hsync !== 1'b1)
+            fail("DE/hsync did not appear at exactly 2-cycle latency");
+        expect_pixel(10'd77, 10'd88, 10'd99, "pixel not aligned with its DE");
+        @(posedge clk);
+        #1;
+        if (out_de !== 1'b0 || out_hsync !== 1'b0)
+            fail("single-cycle DE pulse was stretched");
+
+        // V1: randomized co-simulation against the reference model.
+        rand_seed = 32'h5EED0001;
+
+        // Deterministic extremes first: max gain with max positive offset,
+        // then zero gain with most-negative offset.
+        apply_random_config(16'hFFFF, 16'hFFFF, 16'hFFFF,
+                            16'h7FFF, 16'h7FFF, 16'h7FFF, 1'b1, 1'b1);
+        check_random_pixels(16'hFFFF, 16'hFFFF, 16'hFFFF,
+                            16'h7FFF, 16'h7FFF, 16'h7FFF, 1'b1, 1'b1, 8);
+        apply_random_config(16'h0000, 16'h0000, 16'h0000,
+                            16'h8000, 16'h8000, 16'h8000, 1'b1, 1'b1);
+        check_random_pixels(16'h0000, 16'h0000, 16'h0000,
+                            16'h8000, 16'h8000, 16'h8000, 1'b1, 1'b1, 8);
+
+        for (cfg_i = 0; cfg_i < 10; cfg_i = cfg_i + 1) begin
+            rnd_r_gain = $random(rand_seed);
+            rnd_g_gain = $random(rand_seed);
+            rnd_b_gain = $random(rand_seed);
+            rnd_r_offset = $random(rand_seed);
+            rnd_g_offset = $random(rand_seed);
+            rnd_b_offset = $random(rand_seed);
+            rnd_enable = (cfg_i == 0) ? 1'b0 : 1'b1; // keep one pass-through config
+            rnd_offset_enable = $random(rand_seed);
+            apply_random_config(rnd_r_gain, rnd_g_gain, rnd_b_gain,
+                                rnd_r_offset, rnd_g_offset, rnd_b_offset,
+                                rnd_enable, rnd_offset_enable);
+            check_random_pixels(rnd_r_gain, rnd_g_gain, rnd_b_gain,
+                                rnd_r_offset, rnd_g_offset, rnd_b_offset,
+                                rnd_enable, rnd_offset_enable, 40);
+        end
+
+        write_reg(8'h7f, 16'hD65D);
 
         $display("PASS: wp_adjust directed tests");
         $finish;
