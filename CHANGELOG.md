@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the hardware I2C backend for the boot loader (`host/wp_i2cdev.py`, Track B4): `wp_load.py --backend i2cdev --i2c-dev /dev/i2c-1 --i2c-addr 0x1E --wp-page 0x03` talks to the FPGA new slave using the page transport (2 bytes per logical register, big-endian, `byte_addr = logical << 1`; explicit two-byte `{page, reg}` pointer on every access). Exit code 5 when the transport is unavailable. Covered by frame-level unit tests plus a full `apply_profile` end-to-end test over a fake i2c-dev device.
 - Register-map implementation revision bumped to `0x13` (`VERSION = 0x0113`): writing `0xC0FF` to `COMMIT` now cancels an armed commit while preserving shadow and active registers (previously only `DEFAULTS` could clear a pending commit, destroying calibration). Host adds `WpAdjustRegisters.cancel_commit()`; mock backend and testbenches updated.
 - Added elaboration-time parameter guards: `FRAC_BITS` outside [2,15] or `PIXEL_BITS` outside [4,15] now fail synthesis/elaboration with a self-describing error instead of producing silently broken hardware (e.g. `FRAC_BITS=16` overflowed unity gain to zero). `make guard-check` (part of `synth-check`) asserts the failures.
 - Added opt-in integration parameters, both defaulting to existing behavior: `VSYNC_ACTIVE_HIGH=0` commits on the filtered active edge of an active-low vsync (`out_vsync` keeps input polarity); `GATE_BLANKING=1` forces RGB outputs to zero when delayed DE is low. Covered by the new `tb/tb_wp_adjust_options.v`.

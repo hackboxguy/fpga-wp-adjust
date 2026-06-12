@@ -14,6 +14,12 @@ from typing import Any, Callable, Dict, Optional
 
 import jsonschema
 
+from host.wp_i2cdev import (
+    DEFAULT_I2C_ADDRESS,
+    DEFAULT_I2C_DEVICE,
+    DEFAULT_WP_PAGE,
+    I2CDevBackend,
+)
 from host.wp_registers import (
     DEFAULT_FRAC_BITS,
     DryRunBackend,
@@ -188,9 +194,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument(
         "--backend",
-        choices=("dry-run", "mock"),
+        choices=("dry-run", "mock", "i2cdev"),
         default="dry-run",
-        help="Backend to use. Hardware backends are board-specific and added later.",
+        help="Backend to use. 'i2cdev' talks to the FPGA new I2C slave over "
+             "/dev/i2c-N (wp_adjust page transport).",
+    )
+    parser.add_argument(
+        "--i2c-dev",
+        default=DEFAULT_I2C_DEVICE,
+        help="I2C character device for --backend i2cdev.",
+    )
+    parser.add_argument(
+        "--i2c-addr",
+        type=lambda v: int(v, 0),
+        default=DEFAULT_I2C_ADDRESS,
+        help="FPGA new-slave 7-bit I2C address (default 0x1E).",
+    )
+    parser.add_argument(
+        "--wp-page",
+        type=lambda v: int(v, 0),
+        default=DEFAULT_WP_PAGE,
+        help="Register page hosting wp_adjust on the new slave (default 0x03).",
     )
     parser.add_argument(
         "--dry-run",
@@ -223,13 +247,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.backend == "i2cdev":
+        try:
+            backend = I2CDevBackend(
+                device=args.i2c_dev, address=args.i2c_addr, page=args.wp_page
+            )
+        except (OSError, ValueError) as exc:
+            LOGGER.error("i2c transport unavailable; not applying calibration: %s", exc)
+            return 5
+        regs_factory = lambda: WpAdjustRegisters(backend)
+    elif args.backend == "mock":
+        regs_factory = make_mock_registers
+    else:
+        regs_factory = make_dry_run_registers
+
     try:
         profile = load_profile(args.cal, schema_path=args.schema)
-        regs = (
-            make_mock_registers()
-            if args.backend == "mock"
-            else make_dry_run_registers()
-        )
+        regs = regs_factory()
         result = apply_profile(
             regs,
             profile,
