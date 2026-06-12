@@ -107,18 +107,38 @@ The boot-restore sequence in full (probe → wait-not-pending → write shadow �
 tolerance) is exactly what `fpga-wp-adjust/host/wp_load.py` implements; it
 only needs the i2cdev backend below.
 
-### 1.3 The calibration file the Pi replays at boot
+### 1.3 The calibration file the Pi replays at boot — owner: **als-dimmer**
+
+The boot-replay role already exists: the **als-dimmer daemon**
+(`tmp-folder/als-dimmer/`, the display brightness/settings controller) loads
+white-point calibration from `/home/pi/system-settings/` at startup and
+writes it to the FPGA. Today's implementation
+(`src/main.cpp` `restoreWhitePointCalibration()`, called once at daemon
+start; `I2CDimmerOutput::applyWhitePoint/writeWhitePointRegister`):
+
+- reads `/home/pi/system-settings/white-point-calibration.json`
+  (config-overridable: `white_point_calibration.{enabled,file_path}`),
+- parses top-level `wpx/wpy/wpz` (0..256, legacy scale),
+- writes them with the **legacy `0x1D` 4-byte-prefix framing** to
+  `0x37/0x39/0x3B` — which on pixelpipe-fpga displays is a **silent no-op**
+  (registers don't exist, §1.1).
+
+The wp_adjust boot restore therefore extends als-dimmer rather than adding a
+parallel systemd unit (work item 1.4):
 
 - Producer: the **"D65 Calibration"** disp-tester app writes a
   **wp-cal-v1 schema** profile to
   `/home/pi/system-settings/wp-cal-d65.json` (validated against
-  `fpga-wp-adjust/host/schema/wp-cal-v1.schema.json`; verified loadable by
-  `wp_load.py` in mock mode).
-- Consumer: `wp_load.py` (or a vendored stdlib equivalent) at every boot —
-  the FPGA never persists gains by design.
-- Safety already built in: the loader enforces the boot-safe gain window
-  `[unity/4, unity]`, validates the schema, and fails closed leaving the
-  FPGA in pass-through.
+  `fpga-wp-adjust/host/schema/wp-cal-v1.schema.json`); the pair-match app
+  gains the same output (work item 1.3).
+- Consumer: als-dimmer at every boot — the FPGA never persists gains by
+  design. The reference sequence/semantics to port to C++ are
+  `fpga-wp-adjust/host/wp_load.py` (probe → window check → shadow writes →
+  readback verify → COMMIT → poll consumed, pending-until-video tolerated)
+  with the §1.2 byte framing.
+- Safety to carry over: boot-safe gain window `[unity/4, unity]`, fail
+  closed (skip + warn, display stays pass-through) on missing/invalid file
+  or failed probe.
 
 ## 2. Remaining SW Work List
 
@@ -133,7 +153,7 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 | 1.1 | br-wrapper | **Byte-address fix** in `I2CDevWpAdjust.read16/write16` of all three children (`new-white-point-profile-child.py`, `d65-calibration-child.py`, `new-white-point-match-child.py`): send `(addr << 1) & 0xFF` instead of `addr & 0xFF` (the 2-bytes-per-register page-3 mapping, §1.2). Symptom if forgotten: ID read returns wrong/zero bytes. | 1 line × 3 files (+ docstring) |
 | 1.2 | fpga-wp-adjust | **`I2CDevBackend` for `host/wp_load.py`** implementing `RegisterBackend.read16/write16` over `/dev/i2c-N` with the §1.2 framing (stdlib `fcntl.ioctl(I2C_SLAVE=0x0703)` + `os.read/os.write`, same as the children). New CLI: `--backend i2cdev --i2c-dev /dev/i2c-1 --i2c-addr 0x1E --wp-page 0x03`. This is Track B4 of `docs/implementation-plan.md`. Add unit tests for the byte framing (mock fd). | small module + tests |
 | 1.3 | br-wrapper | **Match child: also emit a wp-cal-v1 profile.** `new-white-point-match-child.py` currently writes only its own `disp-tester-white-point-match-v2` JSON — the boot loader cannot replay a *pair-match* result. Mirror the D65 child: write a wp-cal-v1-conformant profile (target_white = measured reference white, `name` = `pair:<peer>:measured-white`) alongside the existing output. | ~60 lines (copy `wp_cal_v1_profile()` from the D65 child) |
-| 1.4 | br-wrapper | **systemd boot-restore unit** (`wp-calibration.service`): after the I2C bus is up, run the loader with `--cal /home/pi/system-settings/wp-cal-d65.json --backend i2cdev --timeout-sec 10`; treat `pending_until_video` as success (video may start later; the commit latches at the first vsync). `ConditionPathExists=` on the cal file so units without calibration boot clean. Decide packaging: buildroot package vs PiOS micropanel deployment (open question §4.1). | unit file + install hook |
+| 1.4 | als-dimmer | **Extend the daemon's boot replay for wp_adjust** (§1.3). Add a config block (e.g. `white_point_calibration.wp_adjust = {enabled, file_path: /home/pi/system-settings/wp-cal-d65.json, i2c_address: 0x1E, page: 0x03}`) and a C++ restore path mirroring `wp_load.py`: probe ID/VERSION/FRAC_BITS on `0x1E` page 3 (skip quietly if the probe fails — old display or RTL not present), enforce the boot-safe gain window, write shadow gains/offsets/control with the §1.2 framing, readback-verify, COMMIT, poll STATUS with pending-until-video tolerated. Keep the legacy `wpx/wpy/wpz` replay path as-is during the transition (harmless no-op on new displays); the `0x57A1` ID probe is the natural dispatcher between the two paths. Note the daemon's existing fd is ioctl'd to the dimmer address — the wp_adjust path needs its own `I2C_SLAVE` ioctl/fd for `0x1E`. | C++, ~200 lines + config |
 | 1.5 | br-wrapper | **Panel-serial file convention** for per-unit calibrations: interim single default file now; serial-keyed `wp-cal-<serial>.json` once the factory serial-number feature exists — full plan in §4. | small |
 
 ### Phase SW-2 — after RTL-2 (page-3 probe HW-verified)
@@ -148,10 +168,10 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 
 | # | Repo | Task |
 |---|---|---|
-| 3.1 | bench | **"D65 Calibration"** on one display; verify white moves toward D65 within tolerance; confirm `wp-cal-d65.json` + session log written; reboot and confirm the systemd unit (1.4) restores the gains (STATUS consumed, active regs match the profile). |
+| 3.1 | bench | **"D65 Calibration"** on one display; verify white moves toward D65 within tolerance; confirm `wp-cal-d65.json` + session log written; reboot and confirm the als-dimmer replay (1.4) restores the gains (STATUS consumed, active regs match the profile, daemon log shows the wp_adjust path taken). |
 | 3.2 | bench | **"White Point Matching New"** with the second display per `docs/pair-matching.md` (common target, luminance co-matching, pair Δu′v′ acceptance, gray-ramp checks). |
 | 3.3 | br-wrapper | Button curation: set `"enabled": false` in the launcher JSON for whichever of the five white-point buttons are not kept (candidates to hide after validation: legacy "White Point Matching" — inert on pixelpipe displays per §1.1 — and "White Point Profiling New" once characterization is done). Do not delete entries; keep configs recoverable. |
-| 3.4 | br-wrapper | **Legacy phase-out check**: confirm nothing else replays the *legacy* calibration at boot — the old flow's `white-point-calibration.json` kept top-level `wpx/wpy/wpz` "for simple startup replay by als-dimmer". On pixelpipe displays those writes are no-ops, but the replay should be disabled/ignored explicitly so logs stay clean and nobody debugs a ghost. |
+| 3.4 | als-dimmer | **Legacy replay retirement**: once all deployed displays are pixelpipe-based and `0x1D` is retired, remove `restoreWhitePointCalibration()`'s legacy `wpx/wpy/wpz` path (`main.cpp` startup + `I2CDimmerOutput::applyWhitePoint`) and the legacy `white-point-calibration.json` handling, leaving only the wp_adjust path from 1.4. Until then the legacy path stays (no-op on new displays) with the ID probe dispatching. |
 
 ### Phase SW-4 — optional / nice-to-have
 
@@ -169,7 +189,7 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 3. Profile JSON from real silicon analyzed: monotonic, linear (−16/−4 LSB
    ratio ≈ 4), per-LSB response above noise, gamma extracted.
 4. D65 calibration converges within tolerance; luminance loss recorded.
-5. Reboot restores calibration automatically (systemd unit); STATUS shows
+5. Reboot restores calibration automatically (als-dimmer); STATUS shows
    consumed; active gains match the JSON.
 6. Power-cycle + reboot with **no calibration file** boots clean into
    pass-through (loader exits with the documented warning).
@@ -223,9 +243,10 @@ wiring.
 
 ## 5. Open Questions (need owner decisions, none block SW-1)
 
-1. **Where does the boot-restore service ship?** Buildroot package in
-   br-wrapper (`disp-tester` or a new `wp-cal` package) vs the PiOS
-   micropanel deployment. The loader itself is deployment-agnostic.
+1. ~~Where does the boot-restore service ship?~~ **Resolved**: the
+   boot-restore owner is the existing **als-dimmer daemon** (§1.3 / work
+   item 1.4); no new service. `wp_load.py` remains the reference
+   implementation and the bench/manual tool.
 2. **Single profile vs per-condition profiles**: one calibration file per
    unit now; temperature-banded profiles (PRD V2D) would extend the
    loader's file selection later — no schema change needed.
