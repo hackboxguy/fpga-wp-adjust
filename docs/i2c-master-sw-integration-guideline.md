@@ -140,6 +140,41 @@ parallel systemd unit (work item 1.4):
   closed (skip + warn, display stays pass-through) on missing/invalid file
   or failed probe.
 
+### 1.4 Backward-compatibility guarantees (Lattice legacy displays)
+
+**The legacy path is live, not dead**: on the Lattice-FPGA displays the
+`wpx/wpy/wpz` registers exist and als-dimmer's boot replay actively
+calibrates them. Every SW-1 change must therefore satisfy these guarantees:
+
+1. **The legacy als-dimmer path runs unconditionally, byte-identical to
+   today** — same file (`white-point-calibration.json`), same parse, same
+   4-byte-prefix writes, same order/timing, still on by default. It is
+   *not* gated on any new probe or config. (Earlier drafts said the ID
+   probe "dispatches between" the paths — wrong; the paths are
+   independent and additive.)
+2. **Filename separation**: the new flow never reads or writes the legacy
+   `/home/pi/system-settings/white-point-calibration.json`. New files only:
+   `wp-cal-d65.json` (+ `-session`), `white-point-calibration-v2.json`,
+   and the match child's future wp-cal-v1 output gets its own name
+   (`wp-cal-match.json`). The legacy match app keeps sole ownership of the
+   legacy file.
+3. **The new wp_adjust path is triple-gated and defaults OFF**:
+   (a) new optional config key `white_point_calibration.wp_adjust.enabled`,
+   **default `false`** — existing config files (none of which carry a
+   `white_point_calibration` block at all) parse identically and never
+   take the new path; only the pixelpipe display configs opt in.
+   (b) calibration file present, (c) `0x57A1` ID probe answers on `0x1E`
+   page 3. Gate (a) before any I2C traffic matters on Lattice: there is no
+   guarantee what sits at bus address `0x1E` on those displays, so the
+   daemon must not even probe unless the config says this is a
+   wp_adjust-capable display.
+4. **Failure isolation**: any error in the new path logs and continues —
+   it must never abort the daemon, skip the legacy replay, or affect
+   brightness control.
+5. **UI separation** (already true): the legacy "White Point Matching"
+   button/scripts are untouched and keep working on Lattice displays; the
+   new buttons are separate entries.
+
 ## 2. Remaining SW Work List
 
 Ordered and gated on the RTL bring-up steps of
@@ -152,8 +187,8 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 |---|---|---|---|
 | 1.1 | br-wrapper | **Byte-address fix** in `I2CDevWpAdjust.read16/write16` of all three children (`new-white-point-profile-child.py`, `d65-calibration-child.py`, `new-white-point-match-child.py`): send `(addr << 1) & 0xFF` instead of `addr & 0xFF` (the 2-bytes-per-register page-3 mapping, §1.2). Symptom if forgotten: ID read returns wrong/zero bytes. | 1 line × 3 files (+ docstring) |
 | 1.2 | fpga-wp-adjust | **`I2CDevBackend` for `host/wp_load.py`** implementing `RegisterBackend.read16/write16` over `/dev/i2c-N` with the §1.2 framing (stdlib `fcntl.ioctl(I2C_SLAVE=0x0703)` + `os.read/os.write`, same as the children). New CLI: `--backend i2cdev --i2c-dev /dev/i2c-1 --i2c-addr 0x1E --wp-page 0x03`. This is Track B4 of `docs/implementation-plan.md`. Add unit tests for the byte framing (mock fd). | small module + tests |
-| 1.3 | br-wrapper | **Match child: also emit a wp-cal-v1 profile.** `new-white-point-match-child.py` currently writes only its own `disp-tester-white-point-match-v2` JSON — the boot loader cannot replay a *pair-match* result. Mirror the D65 child: write a wp-cal-v1-conformant profile (target_white = measured reference white, `name` = `pair:<peer>:measured-white`) alongside the existing output. | ~60 lines (copy `wp_cal_v1_profile()` from the D65 child) |
-| 1.4 | als-dimmer | **Extend the daemon's boot replay for wp_adjust** (§1.3). Add a config block (e.g. `white_point_calibration.wp_adjust = {enabled, file_path: /home/pi/system-settings/wp-cal-d65.json, i2c_address: 0x1E, page: 0x03}`) and a C++ restore path mirroring `wp_load.py`: probe ID/VERSION/FRAC_BITS on `0x1E` page 3 (skip quietly if the probe fails — old display or RTL not present), enforce the boot-safe gain window, write shadow gains/offsets/control with the §1.2 framing, readback-verify, COMMIT, poll STATUS with pending-until-video tolerated. Keep the legacy `wpx/wpy/wpz` replay path as-is during the transition (harmless no-op on new displays); the `0x57A1` ID probe is the natural dispatcher between the two paths. Note the daemon's existing fd is ioctl'd to the dimmer address — the wp_adjust path needs its own `I2C_SLAVE` ioctl/fd for `0x1E`. | C++, ~200 lines + config |
+| 1.3 | br-wrapper | **Match child: also emit a wp-cal-v1 profile.** `new-white-point-match-child.py` currently writes only its own `disp-tester-white-point-match-v2` JSON — the boot loader cannot replay a *pair-match* result. Mirror the D65 child: write a wp-cal-v1-conformant profile (target_white = measured reference white, `name` = `pair:<peer>:measured-white`) alongside the existing output, to its OWN file `/home/pi/system-settings/wp-cal-match.json` (never the legacy `white-point-calibration.json` - guarantee SS1.4.2). | ~60 lines (copy `wp_cal_v1_profile()` from the D65 child) |
+| 1.4 | als-dimmer | **Extend the daemon's boot replay for wp_adjust** (§1.3), subject to ALL guarantees in §1.4. Add the optional config block `white_point_calibration.wp_adjust = {enabled: false, file_path: /home/pi/system-settings/wp-cal-d65.json, i2c_address: 0x1E, page: 0x03}` (**default disabled**; only pixelpipe display configs set it true) and an *additional, independent* C++ restore path mirroring `wp_load.py`: gate on config-enabled → file-present → `0x57A1` ID/VERSION/FRAC_BITS probe (skip quietly on any gate), enforce the boot-safe gain window, write shadow gains/offsets/control with the §1.2 framing, readback-verify, COMMIT, poll STATUS with pending-until-video tolerated. The legacy `wpx/wpy/wpz` replay is NOT modified, gated, or reordered — it stays unconditional for the Lattice displays. The wp_adjust path needs its own `I2C_SLAVE` ioctl/fd for `0x1E` (the daemon's existing fd targets the dimmer address). Regression test on a Lattice unit: boot log byte-identical legacy behavior with the new code present and the block absent from config. | C++, ~200 lines + config |
 | 1.5 | br-wrapper | **Panel-serial file convention** for per-unit calibrations: interim single default file now; serial-keyed `wp-cal-<serial>.json` once the factory serial-number feature exists — full plan in §4. | small |
 
 ### Phase SW-2 — after RTL-2 (page-3 probe HW-verified)
@@ -171,7 +206,7 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
 | 3.1 | bench | **"D65 Calibration"** on one display; verify white moves toward D65 within tolerance; confirm `wp-cal-d65.json` + session log written; reboot and confirm the als-dimmer replay (1.4) restores the gains (STATUS consumed, active regs match the profile, daemon log shows the wp_adjust path taken). |
 | 3.2 | bench | **"White Point Matching New"** with the second display per `docs/pair-matching.md` (common target, luminance co-matching, pair Δu′v′ acceptance, gray-ramp checks). |
 | 3.3 | br-wrapper | Button curation: set `"enabled": false` in the launcher JSON for whichever of the five white-point buttons are not kept (candidates to hide after validation: legacy "White Point Matching" — inert on pixelpipe displays per §1.1 — and "White Point Profiling New" once characterization is done). Do not delete entries; keep configs recoverable. |
-| 3.4 | als-dimmer | **Legacy replay retirement**: once all deployed displays are pixelpipe-based and `0x1D` is retired, remove `restoreWhitePointCalibration()`'s legacy `wpx/wpy/wpz` path (`main.cpp` startup + `I2CDimmerOutput::applyWhitePoint`) and the legacy `white-point-calibration.json` handling, leaving only the wp_adjust path from 1.4. Until then the legacy path stays (no-op on new displays) with the ID probe dispatching. |
+| 3.4 | als-dimmer | **Legacy replay retirement**: only once the Lattice legacy displays (where `wpx/wpy/wpz` are live) are migrated or end-of-life AND `0x1D` is retired, remove `restoreWhitePointCalibration()`'s legacy `wpx/wpy/wpz` path (`main.cpp` startup + `I2CDimmerOutput::applyWhitePoint`) and the legacy `white-point-calibration.json` handling, leaving only the wp_adjust path from 1.4. Until then the legacy path stays (no-op on new displays) with the ID probe dispatching. |
 
 ### Phase SW-4 — optional / nice-to-have
 
@@ -199,6 +234,10 @@ RTL-2 = page-3 probe works, RTL-3 = live gains verified).
    pair linkage metadata; reboot of both units restores the matched state.
 9. Legacy `0x1D` regression: brightness, LD/PC enables, ALS, OTA unaffected
    throughout.
+10. **Lattice legacy regression**: on a Lattice display with the updated
+    als-dimmer (wp_adjust block absent/disabled), boot replay of
+    `white-point-calibration.json` via `wpx/wpy/wpz` behaves byte-identically
+    to the previous daemon version; legacy matching app still works.
 
 ## 4. Suggestion: Display-Serial-Linked Calibration (factory process hook)
 
